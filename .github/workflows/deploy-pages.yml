@@ -35,6 +35,7 @@ jobs:
           cp -r example/. _site/
           cp -r lib _site/lib
           cp -r ui _site/ui
+          cp -r tv _site/tv
           find _site -maxdepth 1 -type f \( -name '*.html' -o -name '*.js' \) -exec sed -i 's#\.\./lib/#lib/#g; s#\.\./ui/#ui/#g' {} +
       - uses: actions/upload-pages-artifact@v5.0.0
 
