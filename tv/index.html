@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>PM5 TV</title>
+
+        <script src="../lib/pm5-ble.js"></script>
+        <script src="../lib/pm5-hid.js"></script>
+        <script src="../lib/pm5-mock.js"></script>
+        <script src="../lib/mock-data/csv-source.js"></script>
+        <script src="../lib/pm5-fields.js"></script>
+        <script src="../ui/wake-lock.js"></script>
+        <script src="tv-logic.js"></script>
+        <script src="app.js"></script>
+
+        <link rel="stylesheet" href="style.css">
+    </head>
+
+    <body>
+        <header id="toolbar">
+            <div id="session">
+                <select id="preset" aria-label="Session type"></select>
+                <span id="target-text"></span>
+            </div>
+            <div id="controls">
+                <select id="transport" aria-label="Connection">
+                    <option value="bluetooth">Bluetooth</option>
+                    <option value="usb">USB</option>
+                    <option value="mock">Demo workout</option>
+                </select>
+                <button id="connect" class="primary">Connect</button>
+                <button id="settings-open" aria-label="Settings">Settings</button>
+                <button id="fullscreen" aria-label="Full screen">Full screen</button>
+                <span id="status"></span>
+            </div>
+        </header>
+
+        <main id="board" data-state="idle">
+            <section class="tile split" data-status="none">
+                <div class="tile-label">
+                    <span>Split</span>
+                    <span id="piece-label"></span>
+                </div>
+                <div id="pace" class="huge">-:--.-</div>
+                <div id="pace-delta" class="sub"></div>
+                <div id="boat" hidden>
+                    <div id="boat-track">
+                        <div id="boat-center"></div>
+                        <div id="boat-marker"></div>
+                    </div>
+                    <div id="boat-text" class="sub"></div>
+                </div>
+            </section>
+
+            <section class="tile rate" data-status="none">
+                <div class="tile-label"><span>Rate</span><span id="rate-target"></span></div>
+                <div id="rate" class="big">--</div>
+            </section>
+
+            <section class="tile hr" data-zone="0">
+                <div class="tile-label"><span>Heart rate</span><span id="hr-zone"></span></div>
+                <div id="hr" class="big">--</div>
+            </section>
+
+            <section class="tile small">
+                <div class="tile-label"><span id="dist-label">Meters</span></div>
+                <div id="dist" class="mid">0</div>
+            </section>
+
+            <section class="tile small">
+                <div class="tile-label"><span id="time-label">Time</span></div>
+                <div id="time" class="mid">0:00</div>
+            </section>
+
+            <section class="tile small">
+                <div class="tile-label"><span>Avg split</span></div>
+                <div id="avg" class="mid">-:--.-</div>
+            </section>
+
+            <section class="tile small">
+                <div class="tile-label"><span>Watts</span></div>
+                <div id="watts" class="mid">--</div>
+            </section>
+
+            <section id="splits" class="strip" aria-label="Recent splits"></section>
+
+            <div id="banner" hidden>
+                <div id="banner-title"></div>
+                <div id="banner-sub"></div>
+            </div>
+        </main>
+
+        <dialog id="settings">
+            <form method="dialog">
+                <h2>Targets</h2>
+                <p class="hint">Pick a session type in the top bar, or set your own numbers here for today.</p>
+                <div class="grid">
+                    <label>Fast end of split <input id="set-fast" placeholder="1:55.5"></label>
+                    <label>Slow end of split <input id="set-slow" placeholder="1:56.5"></label>
+                    <label>Rate low <input id="set-rate-lo" type="number" min="10" max="50"></label>
+                    <label>Rate high <input id="set-rate-hi" type="number" min="10" max="50"></label>
+                </div>
+
+                <h2>Heart-rate zones</h2>
+                <p class="hint">Lowest heart rate for each zone. Zone 1 is anything below Zone 2.</p>
+                <div class="grid four">
+                    <label>Zone 2 <input id="set-z2" type="number"></label>
+                    <label>Zone 3 <input id="set-z3" type="number"></label>
+                    <label>Zone 4 <input id="set-z4" type="number"></label>
+                    <label>Zone 5 <input id="set-z5" type="number"></label>
+                </div>
+
+                <h2>Demo workout</h2>
+                <label class="inline">Replay speed
+                    <select id="set-mock-speed">
+                        <option value="1">1x</option>
+                        <option value="4">4x</option>
+                        <option value="16">16x</option>
+                    </select>
+                </label>
+
+                <h2>Getting it on the TV</h2>
+                <ul class="hint">
+                    <li>On the PM5: More Options &rarr; Turn Wireless ON. Pair your heart-rate strap to the PM5 so heart rate comes through too.</li>
+                    <li>Click Connect and pick the PM5. Only one app can be connected to the PM5 at a time.</li>
+                    <li>To put it on the TV, use an HDMI cable, or Chrome's &#8942; menu &rarr; Cast &rarr; Cast tab, then pick the TV.</li>
+                    <li>The top bar hides itself while you row. Move the mouse to bring it back.</li>
+                </ul>
+
+                <div class="actions">
+                    <button value="reset" id="settings-reset">Reset to session defaults</button>
+                    <button value="ok" class="primary">Done</button>
+                </div>
+            </form>
+        </dialog>
+    </body>
+</html>

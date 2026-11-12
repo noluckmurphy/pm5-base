@@ -1,0 +1,278 @@
+/* Big-screen display, meant to be read from an erg across the room.
+   Dark only: a TV in a dim room. Sizes scale with the viewport (vmin/vh)
+   so it fills a cast 1080p tab or a 4K HDMI screen the same way. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+    --bg:        #050608;
+    --tile:      #12141a;
+    --tile-edge: #1f232c;
+    --text:      #f4f5f7;
+    --muted:     #8a90a0;
+    --on:        #22c55e;
+    --slow:      #f59e0b;
+    --way-slow:  #ef4444;
+    --fast:      #38bdf8;
+    --z1:        #8a90a0;
+    --z2:        #22c55e;
+    --z3:        #eab308;
+    --z4:        #f97316;
+    --z5:        #ef4444;
+    --gap:       1.2vmin;
+    --radius:    1.4vmin;
+}
+
+html, body { height: 100%; }
+
+body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+}
+
+/* ---------- toolbar (auto-hides while rowing) ---------- */
+
+#toolbar {
+    position: fixed;
+    inset: 0 0 auto 0;
+    z-index: 10;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: rgba(5, 6, 8, 0.92);
+    border-bottom: 1px solid var(--tile-edge);
+    transition: opacity 0.4s, transform 0.4s;
+    font-size: 15px;
+}
+body.toolbar-hidden #toolbar {
+    opacity: 0;
+    transform: translateY(-100%);
+    pointer-events: none;
+}
+body.toolbar-hidden { cursor: none; }
+
+#session, #controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+#target-text, #status { color: var(--muted); }
+
+select, button, input {
+    font: inherit;
+    color: var(--text);
+    background: var(--tile);
+    border: 1px solid var(--tile-edge);
+    border-radius: 8px;
+    padding: 6px 10px;
+}
+button { cursor: pointer; }
+button:hover, select:hover { border-color: var(--muted); }
+button.primary { background: #2563eb; border-color: #2563eb; }
+button:disabled, select:disabled { opacity: 0.5; cursor: default; }
+
+/* ---------- board ---------- */
+
+#board {
+    position: relative;
+    height: 100vh;
+    padding: var(--gap);
+    display: grid;
+    gap: var(--gap);
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: 1fr 1fr 0.62fr 0.3fr;
+    grid-template-areas:
+        "split split split rate"
+        "split split split hr"
+        "s1    s2    s3    s4"
+        "strip strip strip strip";
+}
+
+.tile {
+    position: relative;
+    background: var(--tile);
+    border: 0.3vmin solid var(--tile-edge);
+    border-radius: var(--radius);
+    padding: 1.6vmin 2.2vmin;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    transition: border-color 0.3s;
+}
+/* keep tile labels clear of the toolbar while it's showing */
+body:not(.toolbar-hidden) #board { padding-top: 64px; }
+#board { transition: padding-top 0.4s; }
+.tile.split { grid-area: split; }
+.tile.rate  { grid-area: rate; }
+.tile.hr    { grid-area: hr; }
+.tile.small:nth-of-type(4) { grid-area: s1; }
+.tile.small:nth-of-type(5) { grid-area: s2; }
+.tile.small:nth-of-type(6) { grid-area: s3; }
+.tile.small:nth-of-type(7) { grid-area: s4; }
+
+.tile-label {
+    position: absolute;
+    top: 1.4vmin;
+    left: 2.2vmin;
+    right: 2.2vmin;
+    display: flex;
+    justify-content: space-between;
+    gap: 2vmin;
+    font-size: 2.6vmin;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+}
+
+.huge, .big, .mid { font-weight: 700; line-height: 1; letter-spacing: -0.02em; white-space: nowrap; }
+.huge { font-size: 27vh; }
+.big  { font-size: 17vh; }
+.mid  { font-size: 9vh; }
+.sub  { font-size: 4.4vh; font-weight: 600; color: var(--muted); margin-top: 1vh; white-space: nowrap; }
+
+/* pace status colours */
+.tile[data-status="on"]       { border-color: var(--on); }
+.tile[data-status="on"] .huge,
+.tile[data-status="on"] .big  { color: var(--on); }
+.tile[data-status="slow"]     { border-color: var(--slow); }
+.tile[data-status="slow"] .huge,
+.tile[data-status="slow"] .big { color: var(--slow); }
+.tile[data-status="way-slow"] { border-color: var(--way-slow); }
+.tile[data-status="way-slow"] .huge { color: var(--way-slow); }
+.tile[data-status="fast"]     { border-color: var(--fast); }
+.tile[data-status="fast"] .huge,
+.tile[data-status="fast"] .big { color: var(--fast); }
+/* rate uses low/high instead of slow/fast */
+.tile.rate[data-status="low"]  { border-color: var(--slow); }
+.tile.rate[data-status="low"] .big  { color: var(--slow); }
+.tile.rate[data-status="high"] { border-color: var(--fast); }
+.tile.rate[data-status="high"] .big { color: var(--fast); }
+
+/* heart-rate zones */
+.tile.hr[data-zone="1"] .big { color: var(--z1); }
+.tile.hr[data-zone="2"] { border-color: var(--z2); } .tile.hr[data-zone="2"] .big { color: var(--z2); }
+.tile.hr[data-zone="3"] { border-color: var(--z3); } .tile.hr[data-zone="3"] .big { color: var(--z3); }
+.tile.hr[data-zone="4"] { border-color: var(--z4); } .tile.hr[data-zone="4"] .big { color: var(--z4); }
+.tile.hr[data-zone="5"] { border-color: var(--z5); } .tile.hr[data-zone="5"] .big { color: var(--z5); }
+
+/* ---------- pace boat ---------- */
+
+#boat { width: 78%; margin-top: 2.5vh; text-align: center; }
+#boat-track {
+    position: relative;
+    height: 2.2vh;
+    border-radius: 99px;
+    background: var(--tile-edge);
+}
+#boat-center {
+    position: absolute;
+    left: 50%;
+    top: -0.8vh;
+    bottom: -0.8vh;
+    width: 0.4vmin;
+    background: var(--muted);
+}
+#boat-marker {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 3.6vh;
+    height: 3.6vh;
+    border-radius: 50%;
+    background: var(--text);
+    transform: translate(-50%, -50%);
+    transition: left 0.6s ease-out, background 0.3s;
+}
+#boat[data-side="ahead"]  #boat-marker { background: var(--on); }
+#boat[data-side="behind"] #boat-marker { background: var(--slow); }
+
+/* ---------- splits strip ---------- */
+
+.strip {
+    grid-area: strip;
+    display: flex;
+    gap: var(--gap);
+    align-items: stretch;
+    min-width: 0;
+    overflow: hidden;
+}
+.strip:empty::before {
+    content: "Splits from each interval show up here";
+    color: var(--muted);
+    font-size: 2.6vmin;
+    align-self: center;
+    padding-left: 1vmin;
+}
+.chip {
+    flex: 0 0 auto;
+    min-width: 13vmin;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    background: var(--tile);
+    border: 0.3vmin solid var(--tile-edge);
+    border-radius: var(--radius);
+    padding: 0 2vmin;
+}
+.chip .n    { font-size: 2.2vmin; color: var(--muted); font-weight: 600; }
+.chip .p    { font-size: 4.6vmin; font-weight: 700; }
+.chip[data-status="on"]   .p { color: var(--on); }
+.chip[data-status="slow"] .p { color: var(--slow); }
+.chip[data-status="fast"] .p { color: var(--fast); }
+
+/* ---------- rest / finished banner ---------- */
+
+#banner {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(5, 6, 8, 0.86);
+    border-radius: var(--radius);
+    z-index: 5;
+    text-align: center;
+}
+#banner[hidden] { display: none; }
+#banner-title { font-size: 20vh; font-weight: 800; letter-spacing: -0.02em; }
+#banner-sub   { font-size: 5vh; color: var(--muted); margin-top: 2vh; font-weight: 600; }
+
+/* ---------- settings dialog ---------- */
+
+dialog {
+    margin: auto;
+    width: min(640px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow: auto;
+    background: var(--tile);
+    color: var(--text);
+    border: 1px solid var(--tile-edge);
+    border-radius: 14px;
+    padding: 24px;
+    font-size: 15px;
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog h2 { font-size: 17px; margin: 18px 0 6px; }
+dialog h2:first-child { margin-top: 0; }
+dialog .hint { color: var(--muted); margin-bottom: 10px; line-height: 1.45; }
+dialog ul.hint { padding-left: 20px; }
+dialog .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+dialog .grid.four { grid-template-columns: repeat(4, 1fr); }
+dialog label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); }
+dialog label.inline { flex-direction: row; align-items: center; gap: 10px; }
+dialog input { width: 100%; background: var(--bg); }
+dialog .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+
+@media (max-width: 560px) {
+    dialog .grid, dialog .grid.four { grid-template-columns: 1fr 1fr; }
+}
