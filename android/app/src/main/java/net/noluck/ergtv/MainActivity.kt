@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Base64
+import android.util.Log
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.view.View
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
@@ -62,6 +65,14 @@ class MainActivity : Activity() {
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
                     assetLoader.shouldInterceptRequest(request.url)
+            }
+            // Page console -> logcat, so a row can be read back with
+            // `adb logcat -s ErgTV`.
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                    Log.i("ErgTV", "${m.messageLevel()} ${m.message()}")
+                    return true
+                }
             }
             addJavascriptInterface(Bridge(), "PM5Android")
         }
@@ -120,14 +131,21 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Log.i("ErgTV", "lifecycle onResume")
         hideSystemUi()
         if (wantConnection && hasPermissions()) link.start()
     }
 
     // Let go of the PM5 when the app isn't on screen, so ErgData or another
     // app can connect to it.
+    override fun onPause() {
+        super.onPause()
+        Log.i("ErgTV", "lifecycle onPause")
+    }
+
     override fun onStop() {
         super.onStop()
+        Log.i("ErgTV", "lifecycle onStop")
         link.stop()
     }
 

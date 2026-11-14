@@ -67,9 +67,31 @@ let renderQueued = false;
 
 const resetSession = () => { state = {}; tracker.reset(); queueRender(); };
 
+// Diagnostics for the TV log (adb logcat -s ErgTV): one line whenever the
+// PM5's workout state, interval counter, duration or programme changes,
+// and a packet-rate line every 10s while connected. Answers issue #8.
+const diag = {
+    keys: ['workoutState', 'intervalCount', 'workoutDuration', 'workoutDurationType', 'workoutType'],
+    seen: {}, n: 0, since: Date.now(),
+    note(d) {
+        if (d.workoutState !== undefined) this.n++;          // general-status packets
+        const changed = this.keys.filter(k => d[k] !== undefined && d[k] !== this.seen[k]);
+        if (changed.length) {
+            for (const k of changed) this.seen[k] = d[k];
+            console.info(`[ergtv] ${changed.map(k => `${k}=${d[k]}`).join(' ')} | t=${d.elapsedTime ?? ''} d=${d.distance ?? ''} rest=${state.restTime ?? ''}`);
+        }
+        const dt = Date.now() - this.since;
+        if (dt >= 10000) {
+            console.info(`[ergtv] status ${(this.n * 1000 / dt).toFixed(1)}/s state=${state.workoutState} rest=${state.restTime ?? ''} d=${state.distance ?? ''}`);
+            this.n = 0; this.since = Date.now();
+        }
+    },
+};
+
 const onData = (event) => {
     const d = event.data || {};
     Object.assign(state, d);
+    diag.note(d);
     tracker.update(d);
     queueRender();
 };
