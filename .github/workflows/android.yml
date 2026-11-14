@@ -1,0 +1,56 @@
+name: Android TV app
+
+on:
+  push:
+    paths:
+      - 'android/**'
+      - 'tv/**'
+      - 'lib/**'
+      - 'ui/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.0
+      - uses: actions/setup-node@v6.4.0
+        with:
+          node-version: '24'
+      - run: node --test
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build debug APK
+        working-directory: android
+        run: gradle --no-daemon :app:assembleDebug
+      - name: Name the APK
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk out/erg-tv.apk
+          ls -l out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: erg-tv-apk
+          path: out/erg-tv.apk
+      # Every build from master or a claude/* branch replaces the APK on a
+      # rolling pre-release, so the TV install step always has one stable URL:
+      # https://github.com/<owner>/pm5-base/releases/download/tv-latest/erg-tv.apk
+      - name: Publish to the tv-latest release
+        if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/claude/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view tv-latest >/dev/null 2>&1 || \
+            gh release create tv-latest --prerelease --title "Erg TV (latest build)" \
+              --notes "Rolling build of the Android TV app. Install with: adb install -r -g erg-tv.apk"
+          gh release upload tv-latest out/erg-tv.apk --clobber
+          gh release edit tv-latest --notes "Rolling build of the Android TV app from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Install with: adb install -r -g erg-tv.apk"

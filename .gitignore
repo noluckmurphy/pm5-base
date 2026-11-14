@@ -3,3 +3,7 @@
 # regenerate it. Not redistributed since this repo is public.
 docs/csafe-spec.pdf
 docs/csafe-spec.txt
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties

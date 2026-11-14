@@ -99,6 +99,26 @@ const tvLogic = {
         return null;
     },
 
+    // Compare today's planned piece ({ kind, total, rest }, from today.json)
+    // with what is programmed on the PM5 (`chunk` from splits.js, and the
+    // rest in seconds once the PM5 has shown one). Returns a list of
+    // human-readable differences; empty when they agree or can't be told.
+    planMismatch(planned, chunk, restSeconds) {
+        const out = [];
+        if (!planned || !chunk) return out;
+        const fmt = (kind, v) => kind === 'time' ? tvLogic.formatClock(v) : `${v}m`;
+        if (planned.total > 0) {
+            if (!(chunk.total > 0)) out.push(`plan ${fmt(planned.kind, planned.total)}, PM5 just row`);
+            else if (planned.kind !== chunk.kind || Math.abs(planned.total - chunk.total) > (chunk.kind === 'time' ? 2 : 5)) {
+                out.push(`plan ${fmt(planned.kind, planned.total)}, PM5 ${fmt(chunk.kind, chunk.total)}`);
+            }
+        }
+        if (planned.rest > 0 && restSeconds > 0 && Math.abs(planned.rest - restSeconds) > 5) {
+            out.push(`plan ${tvLogic.formatClock(planned.rest)} rest, PM5 ${tvLogic.formatClock(restSeconds)}`);
+        }
+        return out;
+    },
+
     // Middle of a band, used as the pace-boat speed.
     bandMid(fast, slow) {
         return (fast + slow) / 2;
