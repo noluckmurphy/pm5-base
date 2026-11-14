@@ -15,9 +15,23 @@ android {
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
     }
 
+    // One fixed debug key, checked in, so every CI build installs over the
+    // last one. (CI otherwise makes a fresh key per run, and Android refuses
+    // an update signed with a different key.) It's a sideloaded personal
+    // app, so a public debug key is fine; it protects nothing.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = rootProject.file("erg-tv-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
