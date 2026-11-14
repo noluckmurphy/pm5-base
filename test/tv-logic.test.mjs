@@ -89,3 +89,13 @@ test('presets have a fast edge at or below the slow edge', () => {
         assert.ok(p.rateLo <= p.rateHi, id);
     }
 });
+
+test('planMismatch flags a PM5 programme that differs from the plan', () => {
+    const plan = { kind: 'distance', total: 2000, rest: 300 };
+    assert.deepEqual(L.planMismatch(plan, { kind: 'distance', size: 250, total: 2000 }, 300), []);
+    assert.deepEqual(L.planMismatch(plan, { kind: 'distance', size: 250, total: 2000 }, undefined), []);
+    assert.deepEqual(L.planMismatch(plan, { kind: 'distance', size: 250, total: 2000 }, 240), ['plan 5:00 rest, PM5 4:00']);
+    assert.deepEqual(L.planMismatch(plan, { kind: 'distance', size: 100, total: 500 }), ['plan 2000m, PM5 500m']);
+    assert.deepEqual(L.planMismatch(plan, { kind: 'distance', size: 500, total: 0 }), ['plan 2000m, PM5 just row']);
+    assert.deepEqual(L.planMismatch(null, { kind: 'distance', size: 500, total: 0 }), []);
+});

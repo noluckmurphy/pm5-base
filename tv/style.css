@@ -64,6 +64,8 @@ body.has-toolbar:not(.toolbar-hidden) #board { padding-top: 56px; }
 .bd-target { text-align: right; }
 #target-label { font-size: 2.6vh; color: var(--muted); font-weight: 600; white-space: nowrap; }
 #target-text { font-size: 4vh; font-weight: 700; white-space: nowrap; }
+#plan-warn { font-size: 2.4vh; font-weight: 700; color: var(--slow); margin-top: .6vh; white-space: nowrap; }
+#plan-warn[hidden] { display: none; }
 
 .bd-cols, .row {
     display: grid;

@@ -28,6 +28,7 @@ const todayKey = () => {
 
 // ---------- targets: plan for today, remote override on top ----------
 let planDay = null;                      // from today.json
+let planSource = 'none';                 // 'live' | 'bundled' | 'none'
 let manual = saved.manual?.date === todayKey() ? saved.manual : null;   // { date, preset, shift }
 const hrBounds = saved.hrBounds ?? [...tvLogic.DEFAULT_HR_BOUNDS];
 
@@ -51,6 +52,7 @@ async function loadPlan() {
             if (!res.ok) continue;
             const plan = await res.json();
             planDay = plan.days?.[todayKey()] ?? null;
+            planSource = url.startsWith('http') ? 'live' : 'bundled';
             queueRender();
             return;
         } catch { /* offline: try the bundled copy */ }
@@ -85,6 +87,7 @@ const markText = (chunk, mark) => chunk.kind === 'time' ? tvLogic.formatClock(ma
 
 const statusFor = (pace, t) => {
     const r = tvLogic.paceStatus(pace, t.fast, t.slow);
+    if (r.status !== 'none' && Math.abs(r.delta) < 0.05) return { ...r, status: 'on', delta: 0 };  // shows as ±0.0 otherwise
     return r.status === 'slow' && r.delta > 2 ? { ...r, status: 'way-slow' } : r;
 };
 
@@ -103,8 +106,7 @@ const vsLastCell = (delta) => {
 // ---------- breakdown ----------
 function renderBreakdown(t, hasTarget) {
     const piece = tracker.current ?? tracker.pieces[tracker.pieces.length - 1] ?? null;
-    const prev = piece === tracker.current ? tracker.previous
-        : tracker.pieces.length > 1 ? tracker.pieces[tracker.pieces.length - 2] : null;
+    const prev = tracker.previousFor(piece);
     const resting = tvLogic.isRest(state.workoutState);
     const finished = tvLogic.isFinished(state.workoutState);
     const rowsEl = $('#bd-rows');
@@ -120,12 +122,17 @@ function renderBreakdown(t, hasTarget) {
 
     const n = tracker.pieces.indexOf(piece) + 1;
     const { chunk } = piece;
+    // A just-row piece (warm-up, cool-down) isn't scored against an
+    // interval target; only Zone 2 and Just row targets apply to it.
+    if (!(chunk.total > 0) && !['zone2', 'free'].includes(t.preset)) hasTarget = false;
     const lengthText = chunk.total > 0
         ? (chunk.kind === 'time' ? tvLogic.formatClock(chunk.total) : `${chunk.total}m`)
         : 'Just row';
     const title = finished ? 'Workout done' : resting ? `Piece ${n} done` : `Piece ${n}`;
     setText($('#bd-title'), title);
-    setText($('#bd-sub'), `${lengthText} · ${chunk.kind === 'time' ? tvLogic.formatClock(chunk.size) : chunk.size + 'm'} splits`);
+    const restText = tracker.restSeconds ? ` · ${tvLogic.formatClock(tracker.restSeconds)} rest` : '';
+    const scoring = hasTarget ? '' : chunk.total > 0 ? '' : ' · not scored';
+    setText($('#bd-sub'), `PM5: ${lengthText}${restText} · ${chunk.kind === 'time' ? tvLogic.formatClock(chunk.size) : chunk.size + 'm'} splits${scoring}`);
 
     const rows = splitsLogic.rowCount(piece);
     rowsEl.style.setProperty('--rows', String(Math.max(rows, 4)));
@@ -187,7 +194,7 @@ function renderBreakdown(t, hasTarget) {
     rowsEl.replaceChildren(...frag);
 
     // Footer: average so far, vs target and vs the last piece
-    const avg = splitsLogic.average(piece);
+    const avg = piece.done && piece.pm5Avg > 0 ? piece.pm5Avg : splitsLogic.average(piece);
     const foot = [];
     if (Number.isFinite(avg)) {
         foot.push(`Avg ${tvLogic.formatPace(avg)}`);
@@ -205,7 +212,7 @@ function renderBreakdown(t, hasTarget) {
 
     const done = tracker.pieces.filter(p => p.splits.length && (p !== tracker.current || resting || finished));
     setText($('#bd-pieces'), done.length > 1 || (done.length && piece !== done[done.length - 1])
-        ? done.map((p, i) => `P${i + 1} ${tvLogic.formatPace(splitsLogic.average(p))}`).join('  ')
+        ? done.map((p, i) => `P${i + 1} ${tvLogic.formatPace(p.pm5Avg > 0 ? p.pm5Avg : splitsLogic.average(p))}`).join('  ')
         : '');
 }
 
@@ -231,8 +238,8 @@ function renderLive(t, hasTarget) {
     }
 
     const rate = s.strokeRate ?? s.cadence;
-    $('.live-tile.rate').dataset.status = tvLogic.rateStatus(rate, t.rateLo, t.rateHi);
-    setText($('#rate'), rate > 0 ? String(rate) : '--');
+    $('.live-tile.rate').dataset.status = resting ? 'none' : tvLogic.rateStatus(rate, t.rateLo, t.rateHi);
+    setText($('#rate'), !resting && rate > 0 ? String(rate) : '--');
     setText($('#rate-target'), Number.isFinite(t.rateLo) ? `${t.rateLo}–${t.rateHi}` : '');
 
     const zone = tvLogic.hrZone(s.heartRate, hrBounds);
@@ -240,8 +247,16 @@ function renderLive(t, hasTarget) {
     setText($('#hr'), zone ? String(s.heartRate) : '--');
     setText($('#hr-zone'), zone ? `Zone ${zone}` : 'No strap');
 
-    const left = tvLogic.remaining(s);
-    if (left?.kind === 'distance') {
+    const left = resting ? null : tvLogic.remaining(s);
+    const lastPiece = tracker.pieces[tracker.pieces.length - 1];
+    if (resting && lastPiece?.last) {
+        // the PM5 counts rest metres from the flywheel spinning down; show
+        // the piece just rowed instead
+        const p = lastPiece;
+        const meters = p.chunk.kind === 'distance' && p.chunk.total > 0 ? p.chunk.total : Math.floor(p.last.d - p.origin.d);
+        setText($('#togo-label'), `Piece ${tracker.pieces.length}`);
+        setText($('#togo'), `${meters.toLocaleString()}m`);
+    } else if (left?.kind === 'distance') {
         setText($('#togo-label'), 'Meters to go');
         setText($('#togo'), Math.ceil(left.value).toLocaleString());
     } else if (left?.kind === 'time') {
@@ -260,7 +275,15 @@ function renderLive(t, hasTarget) {
 function render() {
     const t = target();
     const hasTarget = Number.isFinite(t.fast) && Number.isFinite(t.slow);
-    setText($('#target-label'), (t.label ?? '') + (t.shift ? ` (${t.shift > 0 ? '+' : '−'}${Math.abs(t.shift).toFixed(1)}s)` : ''));
+    const src = t.fromPlan ? (planSource === 'live' ? 'Plan' : 'Plan (saved copy)') : manual?.preset ? 'Remote' : 'Default';
+    setText($('#target-label'), `${src}: ${t.label ?? ''}` + (t.shift ? ` (${t.shift > 0 ? '+' : '−'}${Math.abs(t.shift).toFixed(1)}s)` : ''));
+    const piece = tracker.current ?? tracker.pieces[tracker.pieces.length - 1];
+    const chunk = piece?.chunk ?? (tracker.program.workoutDurationType !== undefined
+        ? splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType) : null);
+    const diff = t.fromPlan ? tvLogic.planMismatch(planDay?.piece, chunk, tracker.restSeconds) : [];
+    const warn = $('#plan-warn');
+    warn.hidden = !diff.length;
+    setText(warn, diff.length ? `Doesn't match the plan: ${diff.join(' · ')}` : '');
     setText($('#target-text'), hasTarget
         ? `${tvLogic.formatPace(t.fast)}–${tvLogic.formatPace(t.slow)}` + (Number.isFinite(t.rateLo) ? ` · r${t.rateLo}–${t.rateHi}` : '')
         : 'No target');
@@ -360,8 +383,20 @@ function shiftTarget(delta) {
     queueRender();
 }
 
+// Locked while a piece is under way, so a bumped remote can't change the
+// target mid-piece. Free during rest, before the first stroke and after.
+const arrowsLocked = () => {
+    const p = tracker.current;
+    return !!p && tracker.working && !tracker.finished && !!p.last && (p.last.d - p.origin.d) > 20;
+};
+
 function onKey(e) {
     nudgeToolbar();
+    if (e.key.startsWith('Arrow') && arrowsLocked()) {
+        toast('Remote locked while rowing. Change it in the rest.');
+        e.preventDefault();
+        return;
+    }
     switch (e.key) {
         case 'ArrowLeft': changePreset(-1); break;
         case 'ArrowRight': changePreset(1); break;

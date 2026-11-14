@@ -2,10 +2,10 @@
   "updated": "2026-11-14",
   "source": "rowing/current-plan.md",
   "days": {
-    "2026-11-14": { "preset": "threshold", "label": "Threshold 2×2000m / 5:00r", "fast": 115.5, "slow": 116.5, "rateLo": 24, "rateHi": 26 },
+    "2026-11-14": { "preset": "threshold", "label": "Threshold 2×2000m / 5:00r", "piece": { "kind": "distance", "total": 2000, "reps": 2, "rest": 300 }, "fast": 115.5, "slow": 116.5, "rateLo": 24, "rateHi": 26 },
     "2026-11-15": { "preset": "zone2", "label": "Zone 2, 30–40 min, HR under 135", "fast": 128, "slow": 135, "rateLo": 18, "rateHi": 20 },
     "2026-11-16": { "preset": "zone2", "label": "Rest, or 20 min easy", "fast": 128, "slow": 135, "rateLo": 18, "rateHi": 20 },
-    "2026-11-17": { "preset": "max", "label": "Sharpener 4×1' @ 1:46 / 2:00r", "fast": 105.5, "slow": 106.5, "rateLo": 28, "rateHi": 29 },
-    "2026-11-19": { "preset": "test", "label": "2k test, open 1:48", "fast": 107.5, "slow": 108.5, "rateLo": 28, "rateHi": 29 }
+    "2026-11-17": { "preset": "max", "label": "Sharpener 4×1' @ 1:46 / 2:00r", "piece": { "kind": "time", "total": 60, "reps": 4, "rest": 120 }, "fast": 105.5, "slow": 106.5, "rateLo": 28, "rateHi": 29 },
+    "2026-11-19": { "preset": "test", "label": "2k test, open 1:48", "piece": { "kind": "distance", "total": 2000, "reps": 1 }, "fast": 107.5, "slow": 108.5, "rateLo": 28, "rateHi": 29 }
   }
 }

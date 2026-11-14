@@ -52,28 +52,90 @@ const splitsLogic = {
         }
         const prev = piece.last ?? piece.origin;
         if (cur.t < prev.t || cur.d < prev.d) return piece; // out of order; ignore
-        const { kind, size } = piece.chunk;
+        const { kind, size, total } = piece.chunk;
         const key = kind === 'distance' ? 'd' : 't';
+        const end = total > 0 ? piece.origin[key] + total : Infinity;
+
+        // Past the end of the piece (easing off after the finish, or a late
+        // sample): keep it aside, it's only used if the PM5 never reports
+        // the interval's own time. Never let it into the live split.
+        if (cur[key] >= end) {
+            // only the first sample past the line is close enough to use
+            if (!piece.overshoot) piece.overshoot = cur;
+            return piece;
+        }
+        // Clock ticking with no meters added (stopped, or between strokes):
+        // don't let it drag the live split.
+        if (kind === 'distance' && cur.d === prev.d && piece.last) return piece;
 
         // Close every boundary crossed between prev and cur.
         let next = piece.origin[key] + (piece.splits.length + 1) * size;
-        while (cur[key] >= next) {
+        while (cur[key] >= next && next < end) {
             const at = splitsLogic._interp(prev, cur, key, next);
-            const dt = at.t - piece.start.t;
-            const dd = at.d - piece.start.d;
-            piece.splits.push({
-                n: piece.splits.length + 1,
-                mark: next - piece.origin[key],
-                pace: dd > 0 ? (dt * 500) / dd : NaN,
-                rate: piece.acc.nr ? Math.round(piece.acc.rate / piece.acc.nr) : undefined,
-                hr: piece.acc.nh ? Math.round(piece.acc.hr / piece.acc.nh) : undefined,
-            });
-            piece.start = at;
-            piece.acc = { rate: 0, hr: 0, nr: 0, nh: 0 };
+            splitsLogic._push(piece, at, next - piece.origin[key]);
             next += size;
         }
         piece.last = cur;
         return piece;
+    },
+
+    _push(piece, at, mark, source = 'live') {
+        const dt = at.t - piece.start.t;
+        const dd = at.d - piece.start.d;
+        piece.splits.push({
+            n: piece.splits.length + 1,
+            mark,
+            pace: dd > 0 ? (dt * 500) / dd : NaN,
+            rate: piece.acc.nr ? Math.round(piece.acc.rate / piece.acc.nr) : undefined,
+            hr: piece.acc.nh ? Math.round(piece.acc.hr / piece.acc.nh) : undefined,
+            source,
+        });
+        piece.start = at;
+        piece.acc = { rate: 0, hr: 0, nr: 0, nh: 0 };
+    },
+
+    // Close the last chunk of a piece when it ends. `pm5` is the PM5's own
+    // figure for the whole interval ({ time, distance }, measured from the
+    // piece start) and wins when given. Otherwise use a late sample that
+    // overshot the end, or extrapolate the open chunk's pace.
+    closeFinal(piece, pm5 = null) {
+        if (!piece?.origin || piece.final) return piece;
+        const { kind, size, total } = piece.chunk;
+        if (!(total > 0)) { piece.final = 'none'; return piece; }
+        const rows = splitsLogic.rowCount(piece);
+        // Every boundary before the end must already be closed; only the last chunk is open.
+        if (piece.splits.length !== rows - 1) { piece.final = 'none'; return piece; }
+        let at = null, source = 'estimate';
+        if (pm5 && pm5.time > 0) {
+            at = { t: piece.origin.t + pm5.time, d: piece.origin.d + (pm5.distance > 0 ? pm5.distance : (kind === 'distance' ? total : 0)) };
+            if (kind === 'time') at.t = piece.origin.t + total;
+            source = 'pm5';
+        } else if (piece.overshoot && piece.last) {
+            const key = kind === 'distance' ? 'd' : 't';
+            at = splitsLogic._interp(piece.last, piece.overshoot, key, piece.origin[key] + total);
+        } else if (piece.last) {
+            const pace = splitsLogic.currentPace(piece);
+            if (kind === 'distance' && Number.isFinite(pace)) {
+                const left = piece.origin.d + total - piece.last.d;
+                if (left <= size) at = { t: piece.last.t + (left * pace) / 500, d: piece.origin.d + total };
+            }
+        }
+        if (!at) { piece.final = 'none'; return piece; }
+        piece._startBeforeFinal = { ...piece.start };
+        splitsLogic._push(piece, at, total, source);
+        piece.final = source;
+        return piece;
+    },
+
+    // Replace an estimated last chunk with the PM5's own interval time.
+    reviseFinal(piece, pm5) {
+        if (!piece || piece.final !== 'estimate') return piece;
+        const last = piece.splits.pop();
+        piece.start = piece._startBeforeFinal ?? piece.start;
+        piece.final = null;
+        // keep the rate/HR the estimated split already had
+        piece.acc = { rate: last.rate || 0, hr: last.hr || 0, nr: last.rate ? 1 : 0, nh: last.hr ? 1 : 0 };
+        return splitsLogic.closeFinal(piece, pm5);
     },
 
     // Pace of the chunk in progress so far (sec/500m), or NaN.
@@ -119,37 +181,98 @@ const splitsLogic = {
     },
 };
 
-// Tracks pieces across a whole workout: starts a new piece whenever the PM5
-// resets its per-interval distance/time or goes from rest back to work, and
-// keeps the previous piece for comparison.
+// Tracks pieces across a whole workout. A piece starts when the PM5 is in
+// a work state and its per-interval counters start again (after a rest, or
+// a reset). The PM5's own interval figures close each piece's last chunk.
+const WORK_STATES = [1, 4, 5];          // workout row, interval work time/distance
+const DONE_STATES = [10, 11, 12];       // workout end, terminate, logged
+
 class SplitTracker {
     constructor() { this.reset(); }
 
     reset() {
         this.pieces = [];
         this.current = null;
-        this._resting = false;
-        this._duration = { workoutDuration: undefined, workoutDurationType: undefined };
+        this.state = undefined;         // last PM5 workoutState
+        this.finished = false;
+        this.program = {};              // workoutType / duration as last reported
+        this.restSeconds = undefined;   // programmed rest, from the first rest countdown
+        this._restMax = 0;
     }
 
-    get previous() {
-        const done = this.pieces.filter(p => p !== this.current && p.splits.length);
-        return done[done.length - 1] ?? null;
+    get working() {
+        return this.state === undefined || WORK_STATES.includes(this.state);
+    }
+
+    // The latest finished piece of the same shape as `piece` (same chunking
+    // and length), for the "vs last" column.
+    previousFor(piece) {
+        if (!piece) return null;
+        for (let i = this.pieces.indexOf(piece) - 1; i >= 0; i--) {
+            const p = this.pieces[i];
+            if (p.splits.length && p.chunk.kind === piece.chunk.kind
+                && p.chunk.size === piece.chunk.size && p.chunk.total === piece.chunk.total) return p;
+        }
+        return null;
+    }
+
+    get previous() { return this.previousFor(this.current ?? this.pieces[this.pieces.length - 1]); }
+
+    _endPiece(pm5 = null) {
+        const p = this.current;
+        if (!p) return;
+        splitsLogic.closeFinal(p, pm5);
+        p.done = true;
+        if (!p.splits.length) this.pieces.splice(this.pieces.indexOf(p), 1); // never show empty pieces
+        this.current = null;
     }
 
     update(data) {
-        if (data.workoutDuration !== undefined) this._duration.workoutDuration = data.workoutDuration;
-        if (data.workoutDurationType !== undefined) this._duration.workoutDurationType = data.workoutDurationType;
+        // A different workout programmed on the PM5 starts a fresh session.
+        const prog = ['workoutType', 'workoutDuration', 'workoutDurationType'];
+        for (const k of prog) {
+            if (data[k] === undefined) continue;
+            if (this.program[k] !== undefined && this.program[k] !== data[k] && this.pieces.some(p => p.splits.length)) {
+                this.reset();
+            }
+            this.program[k] = data[k];
+        }
 
-        if (data.workoutState !== undefined) {
-            const resting = [3, 6, 7].includes(data.workoutState);
-            if (this._resting && !resting) this.current = null; // rest just ended: next sample starts a new piece
-            this._resting = resting;
-            if (data.workoutState === 0 && this.current?.splits.length) {
-                this.reset(); // waiting to begin a new workout
+        // The PM5's own end-of-interval figures: close (or correct) the last chunk.
+        if (data.splitIntervalTime > 0 && data.splitIntervalDistance > 0) {
+            const target = this.current ?? [...this.pieces].reverse().find(p => p.done);
+            const total = target?.chunk?.total;
+            const matches = total > 0 && (target.chunk.kind === 'distance'
+                ? Math.abs(data.splitIntervalDistance - total) <= 5
+                : Math.abs(data.splitIntervalTime - total) <= 2);
+            if (matches) {
+                const pm5 = { time: data.splitIntervalTime, distance: data.splitIntervalDistance };
+                if (target === this.current) this._endPiece(pm5);
+                else splitsLogic.reviseFinal(target, pm5);
             }
         }
-        if (this._resting) return;
+        if (data.splitIntervalAveragePace > 0 && data.splitIntervalNumber !== undefined) {
+            const last = [...this.pieces].reverse().find(p => p.done) ?? this.current;
+            if (last) last.pm5Avg = data.splitIntervalAveragePace;
+        }
+
+        if (data.workoutState !== undefined) {
+            const was = this.state;
+            this.state = data.workoutState;
+            const nowWorking = WORK_STATES.includes(this.state);
+            if (was !== undefined && WORK_STATES.includes(was) && !nowWorking) this._endPiece();
+            if (DONE_STATES.includes(this.state)) this.finished = true;
+            if (this.state === 0 && this.finished) this.reset(), (this.state = 0);
+            if (nowWorking) this._restMax = 0;
+        }
+        // The rest countdown starts at the programmed rest, so its highest
+        // value (rounded to 5s) is what the PM5 is set to.
+        if (data.restTime > 0 && !this.working) {
+            this._restMax = Math.max(this._restMax, data.restTime);
+            this.restSeconds = Math.round(this._restMax / 5) * 5;
+        }
+
+        if (this.finished || !this.working) return;
 
         const hasPos = Number.isFinite(data.elapsedTime) && Number.isFinite(data.distance);
         if (!hasPos) {
@@ -163,20 +286,20 @@ class SplitTracker {
 
         const last = this.current?.last;
         if (this.current && last && (data.distance + 5 < last.d || data.elapsedTime + 2 < last.t)) {
-            this.current = null; // counters went back: new interval
+            this._endPiece(); // counters went back: new interval
         }
         if (!this.current) {
-            const chunk = splitsLogic.chunkFor(this._duration.workoutDuration, this._duration.workoutDurationType);
+            const chunk = splitsLogic.chunkFor(this.program.workoutDuration, this.program.workoutDurationType);
             this.current = splitsLogic.newPiece(chunk);
             this.pieces.push(this.current);
-        } else if (this.current.splits.length === 0 && this._duration.workoutDurationType !== undefined) {
+        } else if (this.current.splits.length === 0 && this.program.workoutDurationType !== undefined) {
             // duration info may arrive just after the first samples
-            this.current.chunk = splitsLogic.chunkFor(this._duration.workoutDuration, this._duration.workoutDurationType);
+            this.current.chunk = splitsLogic.chunkFor(this.program.workoutDuration, this.program.workoutDurationType);
         }
         splitsLogic.addSample(this.current, data);
     }
 }
 
 if (typeof module !== 'undefined') {
-    module.exports = { splitsLogic, SplitTracker };
+    module.exports = { splitsLogic, SplitTracker, WORK_STATES, DONE_STATES };
 }
