@@ -120,6 +120,14 @@ const splitsLogic = {
             if (kind === 'distance' && Number.isFinite(pace)) {
                 const left = piece.origin.d + total - piece.last.d;
                 if (left <= size) at = { t: piece.last.t + (left * pace) / 500, d: piece.origin.d + total };
+            } else if (kind === 'time') {
+                // A timed piece stops right on the clock and the PM5 sends no
+                // sample past it, so close the last chunk at the programmed end.
+                const left = piece.origin.t + total - piece.last.t;
+                if (left >= 0 && left <= Math.min(size, 5)) {
+                    const extra = Number.isFinite(pace) && pace > 0 ? (left * 500) / pace : 0;
+                    at = { t: piece.origin.t + total, d: piece.last.d + extra };
+                }
             }
         }
         if (!at) { piece.final = 'none'; return piece; }
