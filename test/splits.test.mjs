@@ -233,3 +233,31 @@ test('interval pieces are not re-cut by their own end-of-interval report', () =>
     assert.equal(tr.pieces[0].chunk.size, 250);
     assert.equal(tr.pieces[0].splits.length, 8);
 });
+
+test("a single 500m uses the PM5's split times, including the last one that arrives after the finish, and no split pace leaks into the piece average", () => {
+    const tr = new SplitTracker();
+    tr.update({ workoutDuration: 500, workoutDurationType: 0x80, workoutState: 1 });
+    const pm5 = [21.1, 20.1, 20.0, 20.0, 19.2];
+    let t = 0, d = 0;
+    for (let i = 0; i < 5; i++) {
+        const pace = (pm5[i] * 500) / 100;
+        while (d < (i + 1) * 100 - 1e-9) {
+            t += 0.25; d = Math.min((i + 1) * 100, d + (0.25 * 500) / pace);
+            if (d >= 500) break;
+            tr.update({ elapsedTime: t, distance: d, strokeRate: 30 });
+        }
+        if (i < 4) {
+            tr.update({ splitIntervalTime: pm5[i], splitIntervalDistance: 100, splitIntervalNumber: i + 1 });
+            tr.update({ splitIntervalAveragePace: pm5[i] * 5, splitIntervalNumber: i + 1 });
+        }
+    }
+    tr.update({ workoutState: 10 });
+    tr.update({ splitIntervalTime: 19.2, splitIntervalDistance: 100, splitIntervalNumber: 5 });
+    tr.update({ splitIntervalAveragePace: 96.0, splitIntervalNumber: 5 });
+    const [p] = tr.pieces;
+    assert.equal(p.splits.length, 5);
+    assert.deepEqual(p.splits.map(s => Math.round(s.pace * 10) / 10), [105.5, 100.5, 100, 100, 96]);
+    assert.ok(p.splits.every(s => s.source === 'pm5'));
+    assert.ok(!(p.pm5Avg > 0));
+    close(S.average(p), 100.4);
+});

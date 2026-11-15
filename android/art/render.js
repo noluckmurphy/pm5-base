@@ -7,7 +7,7 @@ const path = require('path');
   const p = await b.newPage({ deviceScaleFactor: 1 });
   await p.goto('file://' + path.join(__dirname, 'banner.html'));
   await p.evaluate(() => document.fonts.ready);
-  await p.locator('#banner').screenshot({ path: res + '/drawable-xhdpi/banner.png' });
+  await p.locator('#banner').screenshot({ path: res + '/drawable-xhdpi/tv_banner.png' });
   for (const [dir, px] of [['mipmap-mdpi', 48], ['mipmap-hdpi', 72], ['mipmap-xhdpi', 96], ['mipmap-xxhdpi', 144], ['mipmap-xxxhdpi', 192]]) {
     const q = await b.newPage({ deviceScaleFactor: px / 192 });
     await q.goto('file://' + path.join(__dirname, 'banner.html'));

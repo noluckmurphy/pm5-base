@@ -161,7 +161,7 @@ const diag = {
             console.info(`[ergtv] ${changed.map(k => `${k}=${d[k]}`).join(' ')} | t=${d.elapsedTime ?? ''} d=${d.distance ?? ''} rest=${state.restTime ?? ''}`);
         }
         if (d.splitIntervalTime !== undefined) {
-            console.info(`[ergtv] pm5 split #${d.splitIntervalNumber ?? ''} time=${d.splitIntervalTime} dist=${d.splitIntervalDistance ?? ''} pace=${d.splitIntervalAveragePace ?? ''}`);
+            console.info(`[ergtv] pm5 split #${d.splitIntervalNumber ?? ''} time=${Math.round(d.splitIntervalTime * 10) / 10} dist=${d.splitIntervalDistance ?? ''} pace=${d.splitIntervalAveragePace ?? ''}`);
         }
         const dt = Date.now() - this.since;
         if (dt >= 10000) {
@@ -210,8 +210,17 @@ const vsLastCell = (delta) => {
 };
 
 // ---------- breakdown ----------
+// The PM5's programmed piece before the first stroke (on the starting
+// block), or null for Just Row / nothing programmed yet.
+function armedChunk() {
+    if (tracker.pieces.length || tracker.finished || tracker.program.workoutDurationType === undefined) return null;
+    const chunk = splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType);
+    return chunk.total > 0 ? chunk : null;
+}
+
 function renderBreakdown(t, hasTarget) {
-    const piece = tracker.current ?? tracker.pieces[tracker.pieces.length - 1] ?? null;
+    const armed = armedChunk();
+    const piece = tracker.current ?? tracker.pieces[tracker.pieces.length - 1] ?? (armed ? splitsLogic.newPiece(armed) : null);
     const prev = tracker.previousFor(piece);
     const resting = tvLogic.isRest(state.workoutState);
     const finished = tvLogic.isFinished(state.workoutState);
@@ -239,11 +248,12 @@ function renderBreakdown(t, hasTarget) {
     const lengthText = chunk.total > 0
         ? (chunk.kind === 'time' ? tvLogic.formatClock(chunk.total) : `${chunk.total}m`)
         : 'Just row';
-    const title = finished ? 'Workout done' : resting ? `Piece ${n} done` : `Piece ${n}`;
+    const title = armed && !tracker.pieces.length ? 'Ready' : finished ? 'Workout done' : resting ? `Piece ${n} done` : `Piece ${n}`;
     setText($('#bd-title'), title);
     const restText = tracker.restSeconds ? ` · ${tvLogic.formatClock(tracker.restSeconds)} rest` : '';
     const scoring = hasTarget ? '' : chunk.total > 0 ? '' : ' · not scored';
-    setText($('#bd-sub'), `PM5: ${lengthText}${restText} · ${chunk.kind === 'time' ? tvLogic.formatClock(chunk.size) : chunk.size + 'm'} splits${scoring}`);
+    const go = armed && !tracker.pieces.length ? ' · start rowing' : '';
+    setText($('#bd-sub'), `PM5: ${lengthText}${restText} · ${chunk.kind === 'time' ? tvLogic.formatClock(chunk.size) : chunk.size + 'm'} splits${scoring}${go}`);
 
     const rows = splitsLogic.rowCount(piece);
     rowsEl.style.setProperty('--rows', String(Math.max(rows, 4)));
@@ -404,7 +414,8 @@ const coach = { page: 0, dismissed: false, shown: false };
 
 // ---------- PM5-only mode: Concept2 workout ideas before the first stroke ----------
 let wodBucket = 1;    // index into wodLogic.BUCKETS
-const showingWods = (t) => t.preset === 'free' && !tracker.pieces.length && !tracker.finished;
+// Only until a workout is set on the PM5: then the board shows its splits.
+const showingWods = (t) => t.preset === 'free' && !tracker.pieces.length && !tracker.finished && !armedChunk();
 
 function renderWods(t) {
     const el = $('#wods');
@@ -419,9 +430,11 @@ function renderWods(t) {
         const name = document.createElement('span'); name.textContent = w.name;
         const mins = document.createElement('span'); mins.className = 'wod-min'; mins.textContent = `~${w.min} min`;
         head.append(name, mins);
+        const setup = document.createElement('div'); setup.className = 'wod-pm5';
+        setup.textContent = `PM5: ${w.pm5}`;
         const how = document.createElement('div'); how.className = 'wod-how';
-        how.textContent = `PM5: ${w.pm5} · ${w.how}${w.cut ? ' (shortened)' : ''}`;
-        li.append(head, how);
+        how.textContent = `${w.how}${w.cut ? ' (shortened)' : ''}`;
+        li.append(head, setup, how);
         return li;
     }));
 }
