@@ -192,3 +192,14 @@ test('the programmed rest is read from the rest countdown', () => {
     tr.update({ workoutState: 5 });
     assert.equal(tr.restSeconds, 240);
 });
+
+test('a single timed piece (10:00, 1:00 splits) closes its last minute when the PM5 stops on the clock', () => {
+    const tr = new SplitTracker();
+    tr.update({ workoutDuration: 600, workoutDurationType: 0, workoutState: 1 });
+    for (let t = 0.5; t <= 599.8; t += 0.5) tr.update({ elapsedTime: t, distance: (t * 500) / 133, strokeRate: 22 });
+    tr.update({ workoutState: 10 });
+    const [p] = tr.pieces;
+    assert.equal(p.splits.length, 10);
+    assert.equal(p.splits[9].mark, 600);
+    assert.ok(Math.abs(p.splits[9].pace - 133) < 0.5);
+});
