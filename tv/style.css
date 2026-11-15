@@ -66,6 +66,7 @@ body.has-toolbar:not(.toolbar-hidden) #board { padding-top: 56px; }
 
 /* ---------- breakdown (the hero) ---------- */
 #breakdown {
+    position: relative;
     background: var(--tile); border-radius: var(--radius);
     padding: 1.6vh 2vw 1.4vh; min-height: 0; min-width: 0;
     display: grid; grid-template-rows: auto auto 1fr auto; grid-template-columns: minmax(0, 1fr); gap: 1vh;
@@ -191,3 +192,18 @@ body.has-toolbar:not(.toolbar-hidden) #board { padding-top: 56px; }
     padding: 1.4vh 3vw; font-size: 3.6vh; font-weight: 700; letter-spacing: .02em; transition: opacity .4s;
     box-shadow: 0 1vh 4vh rgba(0,0,0,.5);
 }
+
+/* ---------- rest coaching cards (#10) ---------- */
+#coach {
+    position: absolute; left: 2vw; right: 2vw; top: 17vh; bottom: 8vh; z-index: 5;
+    background: var(--tile); border-top: .6vh solid var(--accent); border-radius: var(--radius);
+    padding: 2.6vh 2.4vw; display: flex; flex-direction: column; box-shadow: 0 1vh 4vh rgba(0,0,0,.5);
+}
+#coach[hidden] { display: none; }
+.coach-head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--num); text-transform: uppercase; }
+#coach-title { font-size: 5.6vh; font-weight: 800; letter-spacing: .02em; }
+#coach-page { font-size: 2.6vh; font-weight: 700; color: var(--muted); letter-spacing: .14em; }
+#coach-lines { list-style: none; margin-top: 2.4vh; flex: 1; display: flex; flex-direction: column; gap: 2vh; }
+#coach-lines li { font-size: 3.8vh; font-weight: 600; line-height: 1.25; padding-left: 2vw; position: relative; }
+#coach-lines li::before { content: ""; position: absolute; left: 0; top: .55em; width: .9vw; height: .9vw; background: var(--accent); }
+.coach-hint { font-size: 2.2vh; color: var(--muted); font-weight: 600; }
