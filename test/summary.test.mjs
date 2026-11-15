@@ -66,3 +66,19 @@ test('file names say when and what', () => {
     const s = SM.build(twoByTwoK(), target, { startedAt: new Date(2026, 10, 14, 12, 24).toISOString() });
     assert.equal(SM.fileName(s), '2026-11-14-1224-threshold-2x2000m.json');
 });
+
+test('RPE: saved at the top level, null when skipped or out of range, set by arrows and number keys', () => {
+    const tr = twoByTwoK();
+    assert.equal(SM.build(tr, target, { rpe: 7 }).rpe, 7);
+    assert.equal(SM.build(tr, target, {}).rpe, null);
+    assert.equal(SM.build(tr, target, { rpe: 11 }).rpe, null);
+    assert.equal(SM.build(tr, target, { rpe: 6.5 }).rpe, null);
+    assert.equal(SM.stepRpe(null, 1), 5);
+    assert.equal(SM.stepRpe(null, -1), 5);
+    assert.equal(SM.stepRpe(5, 1), 6);
+    assert.equal(SM.stepRpe(10, 1), 10);
+    assert.equal(SM.stepRpe(1, -1), 1);
+    assert.equal(SM.rpeFromKey('7'), 7);
+    assert.equal(SM.rpeFromKey('0'), 10);
+    assert.equal(SM.rpeFromKey('a'), null);
+});

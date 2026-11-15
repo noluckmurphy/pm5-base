@@ -207,3 +207,21 @@ body.has-toolbar:not(.toolbar-hidden) #board { padding-top: 56px; }
 #coach-lines li { font-size: 3.8vh; font-weight: 600; line-height: 1.25; padding-left: 2vw; position: relative; }
 #coach-lines li::before { content: ""; position: absolute; left: 0; top: .55em; width: .9vw; height: .9vw; background: var(--accent); }
 .coach-hint { font-size: 2.2vh; color: var(--muted); font-weight: 600; }
+
+/* ---------- RPE picker on the summary screen ---------- */
+#rpe {
+    position: absolute; left: 2vw; right: 2vw; bottom: 8vh; z-index: 5;
+    background: var(--bg); border-top: .6vh solid var(--accent); border-radius: var(--radius);
+    padding: 2vh 2vw; box-shadow: 0 1vh 4vh rgba(0,0,0,.5);
+}
+#rpe[hidden] { display: none; }
+.rpe-head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--num); text-transform: uppercase; }
+.rpe-head span:first-child { font-size: 5vh; font-weight: 800; letter-spacing: .02em; }
+#rpe-word { font-size: 4vh; font-weight: 700; color: var(--muted); }
+#rpe-scale { display: grid; grid-template-columns: repeat(10, 1fr); gap: .8vw; margin: 1.6vh 0 1.2vh; }
+#rpe-scale span {
+    font-family: var(--num); font-size: 5.4vh; font-weight: 800; text-align: center; padding: 1vh 0;
+    border-radius: var(--radius); background: var(--tile); color: var(--muted);
+}
+#rpe-scale span.on { background: var(--accent); color: #fff; }
+#rpe-hint { font-size: 2.7vh; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
