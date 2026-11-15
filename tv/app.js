@@ -331,6 +331,28 @@ function renderSummary(t, hasTarget) {
         : sv.ok ? 'Saved to your log ✓' : `Not in your log yet: ${sv.msg}`);
 }
 
+// ---------- rest coaching cards (#10) ----------
+const coach = { page: 0, dismissed: false, shown: false };
+
+function renderCoach(t) {
+    const resting = tvLogic.isRest(state.workoutState) && !tracker.finished;
+    if (!resting) { coach.dismissed = false; coach.page = 0; }
+    const show = coachLogic.visible({ resting, restSeconds: tracker.restSeconds, restLeft: state.restTime, dismissed: coach.dismissed });
+    coach.shown = show;
+    const box = $('#coach');
+    box.hidden = !show;
+    if (!show) return;
+    const last = tracker.pieces[tracker.pieces.length - 1] ?? null;
+    const cards = coachLogic.cards({ piece: last, target: t, notes: planDay?.notes ?? [], fmt: tvLogic.formatPace });
+    coach.page = ((coach.page % cards.length) + cards.length) % cards.length;
+    const card = cards[coach.page];
+    setText($('#coach-title'), card.title);
+    setText($('#coach-page'), `${coach.page + 1} / ${cards.length}`);
+    const ul = $('#coach-lines');
+    const html = card.lines.map(l => `<li>${l.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c])}</li>`).join('');
+    if (ul.innerHTML !== html) ul.innerHTML = html;
+}
+
 // ---------- live strip ----------
 function renderLive(t, hasTarget) {
     const s = state;
@@ -416,6 +438,7 @@ function render() {
         : 'No target');
     renderBreakdown(t, hasTarget);
     renderLive(t, hasTarget);
+    renderCoach(t);
 }
 
 // ---------- connection status ----------
@@ -523,6 +546,17 @@ function onKey(e) {
         toast('Remote locked while rowing. Change it in the rest.');
         e.preventDefault();
         return;
+    }
+    // During a long rest the arrows flip coaching cards and OK hides them.
+    const longRest = tvLogic.isRest(state.workoutState) && !tracker.finished
+        && coachLogic.visible({ resting: true, restSeconds: tracker.restSeconds, restLeft: state.restTime, dismissed: false });
+    if (coach.shown && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        coach.page += e.key === 'ArrowRight' ? 1 : -1;
+        queueRender(); e.preventDefault(); return;
+    }
+    if (longRest && e.key === 'Enter') {
+        coach.dismissed = !coach.dismissed;
+        queueRender(); e.preventDefault(); return;
     }
     switch (e.key) {
         case 'ArrowLeft': changePreset(-1); break;

@@ -14,6 +14,7 @@
         <script src="tv-logic.js"></script>
         <script src="splits.js"></script>
         <script src="summary.js"></script>
+        <script src="coach.js"></script>
         <script src="app.js"></script>
 
         <link rel="stylesheet" href="style.css">
@@ -53,6 +54,11 @@
                     <span>Split</span><span>Pace</span><span>vs target</span><span>vs last</span><span>Rate</span><span>HR</span>
                 </div>
                 <div id="bd-rows"></div>
+                <div id="coach" hidden>
+                    <div class="coach-head"><span id="coach-title"></span><span id="coach-page"></span></div>
+                    <ul id="coach-lines"></ul>
+                    <div class="coach-hint">← → more cards · OK hide</div>
+                </div>
                 <div class="bd-foot">
                     <div id="bd-avg"></div>
                     <div id="bd-pieces"></div>
@@ -91,6 +97,7 @@
                 <p><b>↑ ↓</b> make today's target 0.5s faster or slower</p>
                 <p class="muted">Arrows are locked while a piece is under way.</p>
                 <p><b>OK</b> show this help</p>
+                <p class="muted">In a long rest, coaching cards show up: ← → flip them, OK hides or brings them back.</p>
                 <p><b>Back</b> close the app (this frees the PM5 for ErgData)</p>
                 <p id="help-version" class="muted"></p>
             </div>
