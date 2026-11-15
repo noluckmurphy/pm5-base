@@ -110,6 +110,8 @@ const splitsLogic = {
             at = { t: piece.origin.t + pm5.time, d: piece.origin.d + (pm5.distance > 0 ? pm5.distance : (kind === 'distance' ? total : 0)) };
             if (kind === 'time') at.t = piece.origin.t + total;
             source = 'pm5';
+            piece.pm5Time = pm5.time;
+            if (pm5.distance > 0) piece.pm5Distance = pm5.distance;
         } else if (piece.overshoot && piece.last) {
             const key = kind === 'distance' ? 'd' : 't';
             at = splitsLogic._interp(piece.last, piece.overshoot, key, piece.origin[key] + total);

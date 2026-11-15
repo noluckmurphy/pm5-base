@@ -319,3 +319,25 @@ node --test
 
 [Concept2 PM5]: https://www.concept2.com/indoor-rowers/performance-monitors
 [Web Bluetooth]: https://caniuse.com/#feat=web-bluetooth
+
+## Erg TV: saving workouts to GitHub
+
+When the PM5 says a workout is over, the TV app saves a session file
+(format in `tv/summary.js`) on the TV, then uploads it to
+`workouts/<date>-<time>-<preset>-<shape>.json` on the `workout-logs`
+branch of this repo. Files that can't be uploaded (no token, offline)
+stay on the TV and go up on the next save or app start.
+
+One-time token setup, from the Mac that has adb:
+
+1. Create a fine-grained token at https://github.com/settings/personal-access-tokens/new:
+   only this repository, permission **Contents: Read and write**, nothing else.
+2. Copy it, then on the Mac (the token never goes into a file you keep):
+
+   ```
+   pbpaste | adb shell 'run-as net.noluck.ergtv sh -c "cat > files/github-token"'
+   adb shell run-as net.noluck.ergtv ls -l files/github-token
+   ```
+
+The app reads `files/github-token` from its private storage only; the
+web page never sees it.

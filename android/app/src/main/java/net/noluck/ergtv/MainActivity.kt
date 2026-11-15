@@ -30,6 +30,7 @@ class MainActivity : Activity() {
 
     private lateinit var web: WebView
     private lateinit var link: PM5Link
+    private lateinit var saver: WorkoutSaver
     private var wantConnection = false
 
     private val assetLoader by lazy {
@@ -54,6 +55,10 @@ class MainActivity : Activity() {
                 runOnUiThread { js("window.pm5native && window.pm5native.onPacket('$id','$b64')") }
             },
         )
+
+        saver = WorkoutSaver(this) { name, ok, msg ->
+            runOnUiThread { js("window.ergtvSaved && window.ergtvSaved(${q(name)}, $ok, ${q(msg)})") }
+        }
 
         web = WebView(this).apply {
             settings.javaScriptEnabled = true
@@ -80,6 +85,7 @@ class MainActivity : Activity() {
         web.requestFocus()
         web.loadUrl("https://appassets.androidplatform.net/assets/web/tv/index.html?native=1")
         hideSystemUi()
+        saver.uploadPending()
     }
 
     private fun q(s: String) = JSONObject.quote(s)
@@ -103,6 +109,9 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun isConnected(): Boolean = link.isConnected
+
+        @JavascriptInterface
+        fun saveWorkout(name: String, json: String) = saver.save(name, json)
 
         @JavascriptInterface
         fun appVersion(): String = packageManager.getPackageInfo(packageName, 0).versionName ?: ""

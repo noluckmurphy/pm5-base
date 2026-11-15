@@ -41,16 +41,19 @@ jobs:
         with:
           name: erg-tv-apk
           path: out/erg-tv.apk
-      # Every build from master or a claude/* branch replaces the APK on a
-      # rolling pre-release, so the TV install step always has one stable URL:
+      # Master builds replace the APK on the rolling `tv-latest` pre-release,
+      # so the TV install step always has one stable URL:
       # https://github.com/<owner>/pm5-base/releases/download/tv-latest/erg-tv.apk
-      - name: Publish to the tv-latest release
+      # claude/* branch builds go to `tv-preview` instead, so trying out a
+      # branch never changes what the TV gets from tv-latest.
+      - name: Publish the APK to a rolling release
         if: github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/heads/claude/')
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref == 'refs/heads/master' && 'tv-latest' || 'tv-preview' }}
         run: |
-          gh release view tv-latest >/dev/null 2>&1 || \
-            gh release create tv-latest --prerelease --title "Erg TV (latest build)" \
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --prerelease --title "Erg TV ($TAG)" \
               --notes "Rolling build of the Android TV app. Install with: adb install -r -g erg-tv.apk"
-          gh release upload tv-latest out/erg-tv.apk --clobber
-          gh release edit tv-latest --notes "Rolling build of the Android TV app from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Install with: adb install -r -g erg-tv.apk"
+          gh release upload "$TAG" out/erg-tv.apk --clobber
+          gh release edit "$TAG" --notes "Rolling build of the Android TV app from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Install with: adb install -r -g erg-tv.apk"

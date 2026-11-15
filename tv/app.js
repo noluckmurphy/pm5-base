@@ -65,7 +65,48 @@ let state = {};
 const tracker = new SplitTracker();
 let renderQueued = false;
 
-const resetSession = () => { state = {}; tracker.reset(); queueRender(); };
+const resetSession = () => { state = {}; tracker.reset(); session = { startedAt: null, saved: null }; queueRender(); };
+
+// ---------- end-of-workout session file (#11) ----------
+// Saved a few seconds after the PM5 says the workout is over, so its final
+// interval figures have arrived. The Android app writes it to the TV and
+// uploads it to the repo's workout-logs branch.
+let session = { startedAt: null, saved: null };     // saved: null | 'saving' | { ok, msg, name }
+let saveTimer = null;
+
+function noteSession() {
+    if (!session.startedAt && tracker.pieces.length) session.startedAt = new Date().toISOString();
+    if (tracker.finished && !session.saved && !saveTimer && tracker.pieces.some(p => p.splits.length)) {
+        saveTimer = setTimeout(saveSession, 5000);
+    }
+    if (!tracker.pieces.length && session.startedAt) session = { startedAt: null, saved: null };
+}
+
+function saveSession() {
+    saveTimer = null;
+    if (session.saved) return;
+    let appVersion = null;
+    try { appVersion = window.PM5Android?.appVersion() ?? null; } catch { /* old app */ }
+    const summary = summaryLogic.build(tracker, target(), {
+        startedAt: session.startedAt, endedAt: new Date().toISOString(),
+        date: todayKey(), planSource, appVersion,
+    });
+    const name = summaryLogic.fileName(summary);
+    console.info(`[ergtv] session file ${name}`);
+    if (window.PM5Android?.saveWorkout) {
+        session.saved = 'saving';
+        window.PM5Android.saveWorkout(name, JSON.stringify(summary));
+    } else {
+        session.saved = { ok: false, msg: 'not saved (desktop browser)', name };
+        window.pm5tvLastSession = summary;
+    }
+    queueRender();
+}
+
+window.ergtvSaved = (name, ok, msg) => {
+    session.saved = { ok, msg, name };
+    queueRender();
+};
 
 // Diagnostics for the TV log (adb logcat -s ErgTV): one line whenever the
 // PM5's workout state, interval counter, duration or programme changes,
@@ -93,6 +134,7 @@ const onData = (event) => {
     Object.assign(state, d);
     diag.note(d);
     tracker.update(d);
+    noteSession();
     queueRender();
 };
 
@@ -142,6 +184,8 @@ function renderBreakdown(t, hasTarget) {
         return;
     }
 
+    if (tracker.finished) { renderSummary(t, hasTarget); return; }
+    setCols(['Split', 'Pace', 'vs target', 'vs last', 'Rate', 'HR']);
     const n = tracker.pieces.indexOf(piece) + 1;
     const { chunk } = piece;
     // A just-row piece (warm-up, cool-down) isn't scored against an
@@ -238,13 +282,70 @@ function renderBreakdown(t, hasTarget) {
         : '');
 }
 
+const setCols = (names) => {
+    const spans = document.querySelectorAll('.bd-cols span');
+    names.forEach((txt, i) => { if (spans[i]) setText(spans[i], txt); });
+};
+
+// Whole-workout view once the PM5 says it's done: one row per piece.
+function renderSummary(t, hasTarget) {
+    const pieces = tracker.pieces.filter(p => p.splits.length);
+    const rowsEl = $('#bd-rows');
+    setText($('#bd-title'), 'Workout done');
+    setCols(['Piece', 'Avg', 'vs target', 'Spread', 'Rate', 'HR']);
+    const sums = pieces.map((p, i) => summaryLogic.piece(p, i + 1));
+    const totalD = sums.reduce((a, p) => a + p.distance, 0);
+    const totalT = sums.reduce((a, p) => a + p.time, 0);
+    setText($('#bd-sub'), `${pieces.length} piece${pieces.length === 1 ? '' : 's'} · ${totalD.toLocaleString()}m in ${tvLogic.formatClock(totalT)}`);
+    rowsEl.style.setProperty('--rows', String(Math.max(sums.length, 6)));
+    rowsEl.replaceChildren(...sums.map(p => {
+        const row = document.createElement('div');
+        row.className = 'row';
+        const len = p.kind === 'time' ? tvLogic.formatClock(p.total) : p.kind === 'distance' ? `${p.total}m` : `${p.distance}m`;
+        const cells = [
+            ['mark', `P${p.n} ${len}`],
+            ['pace', Number.isFinite(p.avgPace) ? tvLogic.formatPace(p.avgPace) : ''],
+            ['vs', ''],
+            ['vs', p.spread !== null ? `${p.spread.toFixed(1)}s` : ''],
+            ['rate', p.rate ? String(p.rate) : ''],
+            ['hr', p.hr ? String(p.hr) : ''],
+        ];
+        const spans = cells.map(([c, text]) => { const s = document.createElement('span'); s.className = c; s.textContent = text; return s; });
+        if (hasTarget && p.kind !== 'just-row' && Number.isFinite(p.avgPace)) {
+            const vt = vsTargetCell(p.avgPace, t);
+            spans[1].dataset.status = vt.status;
+            spans[2].textContent = vt.text;
+            spans[2].dataset.status = vt.status;
+        }
+        row.append(...spans);
+        return row;
+    }));
+    const avg = totalD > 0 ? (totalT * 500) / totalD : NaN;
+    const avgs = sums.map(p => p.avgPace).filter(Number.isFinite);
+    const foot = [];
+    if (Number.isFinite(avg)) foot.push(`Avg ${tvLogic.formatPace(avg)}`);
+    if (avgs.length > 1) foot.push(`spread ${(Math.max(...avgs) - Math.min(...avgs)).toFixed(1)}s`);
+    setText($('#bd-avg'), foot.join('  ·  '));
+    const sv = session.saved;
+    setText($('#bd-pieces'), !sv ? 'Saving to your log…' : sv === 'saving' ? 'Saving to your log…'
+        : sv.ok ? 'Saved to your log ✓' : `Not in your log yet: ${sv.msg}`);
+}
+
 // ---------- live strip ----------
 function renderLive(t, hasTarget) {
     const s = state;
-    const resting = tvLogic.isRest(s.workoutState);
+    const finished = tracker.finished;
+    const resting = tvLogic.isRest(s.workoutState) || finished;
     const splitTile = $('.live-tile.split');
 
-    if (resting) {
+    if (finished) {
+        const done = tracker.pieces.filter(p => p.splits.length).map((p, i) => summaryLogic.piece(p, i + 1));
+        const dist = done.reduce((a, p) => a + p.distance, 0), time = done.reduce((a, p) => a + p.time, 0);
+        splitTile.dataset.status = 'none';
+        setText($('#split-label'), 'Workout avg');
+        setText($('#pace'), dist > 0 ? tvLogic.formatPace((time * 500) / dist) : '-:--.-');
+        setText($('#pace-delta'), dist > 0 ? `${dist.toLocaleString()}m in ${tvLogic.formatClock(time)}` : '');
+    } else if (resting) {
         splitTile.dataset.status = 'rest';
         setText($('#split-label'), 'Rest');
         setText($('#pace'), tvLogic.formatClock(s.restTime));
@@ -271,7 +372,11 @@ function renderLive(t, hasTarget) {
 
     const left = resting ? null : tvLogic.remaining(s);
     const lastPiece = tracker.pieces[tracker.pieces.length - 1];
-    if (resting && lastPiece?.last) {
+    if (finished) {
+        const total = tracker.pieces.filter(p => p.splits.length).reduce((a, p, i) => a + summaryLogic.piece(p, i + 1).distance, 0);
+        setText($('#togo-label'), 'Total work');
+        setText($('#togo'), `${total.toLocaleString()}m`);
+    } else if (resting && lastPiece?.last) {
         // the PM5 counts rest metres from the flywheel spinning down; show
         // the piece just rowed instead
         const p = lastPiece;
