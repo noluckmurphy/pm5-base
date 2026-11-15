@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Erg TV crest: crossed oars and a star. Unofficial; not a USRowing or Team USA mark. -->
+  <g stroke="#f5f7fa" stroke-width="22" stroke-linecap="round">
+    <line x1="126" y1="126" x2="404" y2="404"/>
+    <line x1="386" y1="126" x2="108" y2="404"/>
+  </g>
+  <path d="M58 58 C 104 34, 162 56, 176 104 L 152 152 C 106 152, 70 116, 58 58 Z" fill="#f5f7fa"/>
+  <path d="M112 50 C 138 54, 162 74, 172 98 L 162 120 C 140 100, 120 80, 106 54 Z" fill="#c8102e"/>
+  <path d="M454 58 C 408 34, 350 56, 336 104 L 360 152 C 406 152, 442 116, 454 58 Z" fill="#f5f7fa"/>
+  <path d="M400 50 C 374 54, 350 74, 340 98 L 350 120 C 372 100, 392 80, 406 54 Z" fill="#c8102e"/>
+  <circle cx="256" cy="256" r="84" fill="#c8102e" stroke="#f5f7fa" stroke-width="12"/>
+  <path transform="translate(256 261) scale(4.4)" d="M0,-14 L4,-4 L14,-4 L6,3 L9,13 L0,7 L-9,13 L-6,3 L-14,-4 L-4,-4 Z" fill="#f5f7fa"/>
+</svg>
