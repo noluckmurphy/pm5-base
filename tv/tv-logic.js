@@ -132,7 +132,7 @@ const tvLogic = {
         max:       { label: 'Max / race pace', fast: 105.5, slow: 106.5, rateLo: 28, rateHi: 29 },
         test:      { label: '2k test (open 1:48)', fast: 107.5, slow: 108.5, rateLo: 28, rateHi: 29 },
         zone2:     { label: 'Zone 2',      fast: 128,   slow: 135,   rateLo: 18, rateHi: 20 },
-        free:      { label: 'Just row',    fast: NaN,   slow: NaN,   rateLo: NaN, rateHi: NaN },
+        free:      { label: 'PM5 only',    fast: NaN,   slow: NaN,   rateLo: NaN, rateHi: NaN },
     },
 
     // Lower edges of HR zones 2..5. Zone 2 = 125-138 matches the plan's

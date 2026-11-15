@@ -2,7 +2,9 @@
 // test/splits.test.mjs): feed it PM5 samples ({ elapsedTime, distance,
 // strokeRate, heartRate, workoutState, workoutDuration, workoutDurationType })
 // and it cuts each piece into fixed chunks, the way a coach's split sheet
-// would, independent of whatever split length is set on the PM5.
+// would. The chunk size is guessed from the piece length until the PM5
+// reports its first split of a single piece; from then on the PM5's own
+// split length is used (the piece is re-cut from its stored samples).
 
 const splitsLogic = {
 
@@ -33,7 +35,7 @@ const splitsLogic = {
     },
 
     newPiece(chunk) {
-        return { chunk, splits: [], origin: null, start: null, last: null, acc: { rate: 0, hr: 0, nr: 0, nh: 0 } };
+        return { chunk, splits: [], origin: null, start: null, last: null, acc: { rate: 0, hr: 0, nr: 0, nh: 0 }, samples: [] };
     },
 
     // Feed one sample into a piece. Returns the piece (mutated).
@@ -148,6 +150,20 @@ const splitsLogic = {
         return splitsLogic.closeFinal(piece, pm5);
     },
 
+    // Use the PM5's own split times for rows that line up with its splits.
+    applyPm5Splits(piece) {
+        if (!piece?.pm5Splits) return piece;
+        for (const [n, sp] of Object.entries(piece.pm5Splits)) {
+            const row = piece.splits[n - 1];
+            if (!row || row.source === 'pm5') continue;
+            const size = piece.chunk.kind === 'time' ? sp.time : sp.distance;
+            if (Math.abs(size - piece.chunk.size) > (piece.chunk.kind === 'time' ? 1 : 2)) continue;
+            row.pace = (sp.time * 500) / sp.distance;
+            row.source = 'pm5';
+        }
+        return piece;
+    },
+
     // Pace of the chunk in progress so far (sec/500m), or NaN.
     currentPace(piece) {
         if (!piece?.last || !piece.start) return NaN;
@@ -178,16 +194,19 @@ const splitsLogic = {
         return split.pace - p.pace;
     },
 
-    // Average pace of the finished splits.
+    // Average pace of the finished splits: total time over total distance,
+    // using each row's real length (the last row of a 1200m or 25:00 piece
+    // is shorter than the rest). Never a plain mean of rows.
     average(piece) {
-        const ok = piece.splits.filter(s => Number.isFinite(s.pace));
-        if (!ok.length) return NaN;
-        // Weighted by each chunk's share: equal chunks, so a plain mean of
-        // time-per-500m is right for distance chunks. For time chunks weight
-        // by distance covered instead (500 * size / pace).
-        if (piece.chunk.kind === 'distance') return ok.reduce((a, s) => a + s.pace, 0) / ok.length;
-        const dist = ok.reduce((a, s) => a + (500 * piece.chunk.size) / s.pace, 0);
-        return (piece.chunk.size * ok.length * 500) / dist;
+        let t = 0, d = 0, prevMark = 0;
+        for (const s of piece.splits) {
+            const len = (s.mark ?? prevMark + piece.chunk.size) - prevMark;
+            prevMark += len;
+            if (!Number.isFinite(s.pace) || !(len > 0)) continue;
+            if (piece.chunk.kind === 'distance') { d += len; t += (s.pace * len) / 500; }
+            else { t += len; d += (500 * len) / s.pace; }
+        }
+        return d > 0 ? (t * 500) / d : NaN;
     },
 };
 
@@ -208,6 +227,7 @@ class SplitTracker {
         this.program = {};              // workoutType / duration as last reported
         this.restSeconds = undefined;   // programmed rest, from the first rest countdown
         this._restMax = 0;
+        this._pendingAvg = null;
     }
 
     get working() {
@@ -232,6 +252,7 @@ class SplitTracker {
         const p = this.current;
         if (!p) return;
         splitsLogic.closeFinal(p, pm5);
+        splitsLogic.applyPm5Splits(p);
         p.done = true;
         if (!p.splits.length) this.pieces.splice(this.pieces.indexOf(p), 1); // never show empty pieces
         this.current = null;
@@ -248,7 +269,11 @@ class SplitTracker {
             this.program[k] = data[k];
         }
 
-        // The PM5's own end-of-interval figures: close (or correct) the last chunk.
+        // The PM5's own split/interval figures. When they match the whole
+        // piece (an interval workout) they close or correct its last chunk.
+        // Otherwise they're one split of a single piece: learn its length and
+        // use its exact time for that row (the last one often lands just
+        // after the PM5 says the piece is over).
         if (data.splitIntervalTime > 0 && data.splitIntervalDistance > 0) {
             const target = this.current ?? [...this.pieces].reverse().find(p => p.done);
             const total = target?.chunk?.total;
@@ -257,13 +282,25 @@ class SplitTracker {
                 : Math.abs(data.splitIntervalTime - total) <= 2);
             if (matches) {
                 const pm5 = { time: data.splitIntervalTime, distance: data.splitIntervalDistance };
+                target.pm5IntervalNo = data.splitIntervalNumber;
+                if (this._pendingAvg && this._pendingAvg.n === data.splitIntervalNumber) target.pm5Avg = this._pendingAvg.pace;
                 if (target === this.current) this._endPiece(pm5);
                 else splitsLogic.reviseFinal(target, pm5);
+            } else if (target) {
+                if (target === this.current && this.working) this._learnSplit(data);
+                const p = target === this.current ? this.current : target;
+                if (data.splitIntervalNumber > 0) {
+                    (p.pm5Splits ??= {})[data.splitIntervalNumber] = { time: data.splitIntervalTime, distance: data.splitIntervalDistance };
+                    splitsLogic.applyPm5Splits(p);
+                }
             }
         }
+        // The PM5's average pace for a whole interval (sent in its own
+        // message). A single piece's per-split averages are not piece averages.
         if (data.splitIntervalAveragePace > 0 && data.splitIntervalNumber !== undefined) {
-            const last = [...this.pieces].reverse().find(p => p.done) ?? this.current;
-            if (last) last.pm5Avg = data.splitIntervalAveragePace;
+            this._pendingAvg = { n: data.splitIntervalNumber, pace: data.splitIntervalAveragePace };
+            const p = [...this.pieces].reverse().find(x => x.pm5IntervalNo === data.splitIntervalNumber);
+            if (p) p.pm5Avg = data.splitIntervalAveragePace;
         }
 
         if (data.workoutState !== undefined) {
@@ -288,6 +325,7 @@ class SplitTracker {
         if (!hasPos) {
             // stroke-only messages still feed rate/HR into the open chunk
             if (this.current && (data.strokeRate > 0 || data.heartRate > 0)) {
+                this.current.samples.push({ strokeRate: data.strokeRate, heartRate: data.heartRate });
                 if (data.strokeRate > 0) { this.current.acc.rate += data.strokeRate; this.current.acc.nr++; }
                 if (data.heartRate > 0 && data.heartRate < 255) { this.current.acc.hr += data.heartRate; this.current.acc.nh++; }
             }
@@ -306,7 +344,34 @@ class SplitTracker {
             // duration info may arrive just after the first samples
             this.current.chunk = splitsLogic.chunkFor(this.program.workoutDuration, this.program.workoutDurationType);
         }
+        this.current.samples.push({ elapsedTime: data.elapsedTime, distance: data.distance, strokeRate: data.strokeRate, heartRate: data.heartRate });
         splitsLogic.addSample(this.current, data);
+        if (this.current.pm5Splits) splitsLogic.applyPm5Splits(this.current);
+    }
+
+    // The PM5's split length for a single piece, learned from its first
+    // split report. Re-cuts the piece so the rows match the PM5's splits.
+    _learnSplit(data) {
+        const p = this.current;
+        if (!p || p.pm5Split || !(p.chunk.total > 0)) return;
+        const size = p.chunk.kind === 'time' ? Math.round(data.splitIntervalTime) : Math.round(data.splitIntervalDistance);
+        if (!(size > 0) || size >= p.chunk.total) return;
+        p.pm5Split = size;
+        if (size === p.chunk.size) return;
+        const chunk = { ...p.chunk, size };
+        const fresh = splitsLogic.newPiece(chunk);
+        fresh.samples = p.samples;
+        fresh.pm5Split = size;
+        fresh.pm5Splits = p.pm5Splits;
+        for (const smp of p.samples) {
+            if (Number.isFinite(smp.elapsedTime) && Number.isFinite(smp.distance)) splitsLogic.addSample(fresh, smp);
+            else {
+                if (smp.strokeRate > 0) { fresh.acc.rate += smp.strokeRate; fresh.acc.nr++; }
+                if (smp.heartRate > 0 && smp.heartRate < 255) { fresh.acc.hr += smp.heartRate; fresh.acc.nh++; }
+            }
+        }
+        this.pieces[this.pieces.indexOf(p)] = fresh;
+        this.current = fresh;
     }
 }
 
