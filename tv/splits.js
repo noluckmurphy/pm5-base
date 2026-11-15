@@ -2,7 +2,9 @@
 // test/splits.test.mjs): feed it PM5 samples ({ elapsedTime, distance,
 // strokeRate, heartRate, workoutState, workoutDuration, workoutDurationType })
 // and it cuts each piece into fixed chunks, the way a coach's split sheet
-// would, independent of whatever split length is set on the PM5.
+// would. The chunk size is guessed from the piece length until the PM5
+// reports its first split of a single piece; from then on the PM5's own
+// split length is used (the piece is re-cut from its stored samples).
 
 const splitsLogic = {
 
@@ -33,7 +35,7 @@ const splitsLogic = {
     },
 
     newPiece(chunk) {
-        return { chunk, splits: [], origin: null, start: null, last: null, acc: { rate: 0, hr: 0, nr: 0, nh: 0 } };
+        return { chunk, splits: [], origin: null, start: null, last: null, acc: { rate: 0, hr: 0, nr: 0, nh: 0 }, samples: [] };
     },
 
     // Feed one sample into a piece. Returns the piece (mutated).
@@ -259,6 +261,8 @@ class SplitTracker {
                 const pm5 = { time: data.splitIntervalTime, distance: data.splitIntervalDistance };
                 if (target === this.current) this._endPiece(pm5);
                 else splitsLogic.reviseFinal(target, pm5);
+            } else if (target && target === this.current && this.working) {
+                this._learnSplit(data);
             }
         }
         if (data.splitIntervalAveragePace > 0 && data.splitIntervalNumber !== undefined) {
@@ -288,6 +292,7 @@ class SplitTracker {
         if (!hasPos) {
             // stroke-only messages still feed rate/HR into the open chunk
             if (this.current && (data.strokeRate > 0 || data.heartRate > 0)) {
+                this.current.samples.push({ strokeRate: data.strokeRate, heartRate: data.heartRate });
                 if (data.strokeRate > 0) { this.current.acc.rate += data.strokeRate; this.current.acc.nr++; }
                 if (data.heartRate > 0 && data.heartRate < 255) { this.current.acc.hr += data.heartRate; this.current.acc.nh++; }
             }
@@ -306,7 +311,32 @@ class SplitTracker {
             // duration info may arrive just after the first samples
             this.current.chunk = splitsLogic.chunkFor(this.program.workoutDuration, this.program.workoutDurationType);
         }
+        this.current.samples.push({ elapsedTime: data.elapsedTime, distance: data.distance, strokeRate: data.strokeRate, heartRate: data.heartRate });
         splitsLogic.addSample(this.current, data);
+    }
+
+    // The PM5's split length for a single piece, learned from its first
+    // split report. Re-cuts the piece so the rows match the PM5's splits.
+    _learnSplit(data) {
+        const p = this.current;
+        if (!p || p.pm5Split || !(p.chunk.total > 0)) return;
+        const size = p.chunk.kind === 'time' ? Math.round(data.splitIntervalTime) : Math.round(data.splitIntervalDistance);
+        if (!(size > 0) || size >= p.chunk.total) return;
+        p.pm5Split = size;
+        if (size === p.chunk.size) return;
+        const chunk = { ...p.chunk, size };
+        const fresh = splitsLogic.newPiece(chunk);
+        fresh.samples = p.samples;
+        fresh.pm5Split = size;
+        for (const smp of p.samples) {
+            if (Number.isFinite(smp.elapsedTime) && Number.isFinite(smp.distance)) splitsLogic.addSample(fresh, smp);
+            else {
+                if (smp.strokeRate > 0) { fresh.acc.rate += smp.strokeRate; fresh.acc.nr++; }
+                if (smp.heartRate > 0 && smp.heartRate < 255) { fresh.acc.hr += smp.heartRate; fresh.acc.nh++; }
+            }
+        }
+        this.pieces[this.pieces.indexOf(p)] = fresh;
+        this.current = fresh;
     }
 }
 

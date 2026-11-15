@@ -160,6 +160,9 @@ const diag = {
             for (const k of changed) this.seen[k] = d[k];
             console.info(`[ergtv] ${changed.map(k => `${k}=${d[k]}`).join(' ')} | t=${d.elapsedTime ?? ''} d=${d.distance ?? ''} rest=${state.restTime ?? ''}`);
         }
+        if (d.splitIntervalTime !== undefined) {
+            console.info(`[ergtv] pm5 split #${d.splitIntervalNumber ?? ''} time=${d.splitIntervalTime} dist=${d.splitIntervalDistance ?? ''} pace=${d.splitIntervalAveragePace ?? ''}`);
+        }
         const dt = Date.now() - this.since;
         if (dt >= 10000) {
             console.info(`[ergtv] status ${(this.n * 1000 / dt).toFixed(1)}/s state=${state.workoutState} rest=${state.restTime ?? ''} d=${state.distance ?? ''}`);
@@ -217,7 +220,9 @@ function renderBreakdown(t, hasTarget) {
 
     if (!piece) {
         setText($('#bd-title'), 'Ready');
-        setText($('#bd-sub'), 'Start rowing and the splits fill in here');
+        setText($('#bd-sub'), t.preset === 'free'
+            ? 'PM5 only: set any workout on the PM5 and the splits follow it'
+            : 'Start rowing and the splits fill in here');
         rowsEl.replaceChildren();
         setText($('#bd-avg'), '');
         setText($('#bd-pieces'), '');
@@ -397,6 +402,30 @@ function renderRpe() {
 // ---------- rest coaching cards (#10) ----------
 const coach = { page: 0, dismissed: false, shown: false };
 
+// ---------- PM5-only mode: Concept2 workout ideas before the first stroke ----------
+let wodBucket = 1;    // index into wodLogic.BUCKETS
+const showingWods = (t) => t.preset === 'free' && !tracker.pieces.length && !tracker.finished;
+
+function renderWods(t) {
+    const el = $('#wods');
+    el.hidden = !showingWods(t);
+    if (el.hidden) return;
+    const max = wodLogic.BUCKETS[wodBucket];
+    setText($('#wods-title'), `Under ${max} min`);
+    setText($('#wods-page'), wodLogic.BUCKETS.map((b, i) => i === wodBucket ? `[${b}]` : String(b)).join('  '));
+    $('#wods-list').replaceChildren(...wodLogic.inBucket(max).map(w => {
+        const li = document.createElement('li');
+        const head = document.createElement('div'); head.className = 'wod-head';
+        const name = document.createElement('span'); name.textContent = w.name;
+        const mins = document.createElement('span'); mins.className = 'wod-min'; mins.textContent = `~${w.min} min`;
+        head.append(name, mins);
+        const how = document.createElement('div'); how.className = 'wod-how';
+        how.textContent = `PM5: ${w.pm5} · ${w.how}${w.cut ? ' (shortened)' : ''}`;
+        li.append(head, how);
+        return li;
+    }));
+}
+
 function renderCoach(t) {
     const resting = tvLogic.isRest(state.workoutState) && !tracker.finished;
     if (!resting) { coach.dismissed = false; coach.page = 0; }
@@ -502,6 +531,7 @@ function render() {
     renderBreakdown(t, hasTarget);
     renderLive(t, hasTarget);
     renderCoach(t);
+    renderWods(t);
 }
 
 // ---------- connection status ----------
@@ -635,8 +665,14 @@ function onKey(e) {
     switch (e.key) {
         case 'ArrowLeft': changePreset(-1); break;
         case 'ArrowRight': changePreset(1); break;
-        case 'ArrowUp': shiftTarget(-0.5); break;     // faster
-        case 'ArrowDown': shiftTarget(0.5); break;    // slower
+        case 'ArrowUp':
+            if (showingWods(target())) { wodBucket = Math.max(0, wodBucket - 1); queueRender(); }
+            else shiftTarget(-0.5);                   // faster
+            break;
+        case 'ArrowDown':
+            if (showingWods(target())) { wodBucket = Math.min(wodLogic.BUCKETS.length - 1, wodBucket + 1); queueRender(); }
+            else shiftTarget(0.5);                    // slower
+            break;
         case 'Enter': {
             const h = $('#help');
             h.hidden = !h.hidden;

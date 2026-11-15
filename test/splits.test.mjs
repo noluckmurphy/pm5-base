@@ -203,3 +203,33 @@ test('a single timed piece (10:00, 1:00 splits) closes its last minute when the 
     assert.equal(p.splits[9].mark, 600);
     assert.ok(Math.abs(p.splits[9].pace - 133) < 0.5);
 });
+
+test('a single timed piece switches to the PM5 split length at its first split report', () => {
+    const tr = new SplitTracker();
+    tr.update({ workoutDuration: 600, workoutDurationType: 0, workoutState: 1 });
+    let t = 0;
+    for (; t <= 120; t += 0.5) tr.update({ elapsedTime: t, distance: (t * 500) / 130, strokeRate: 22, heartRate: 130 });
+    assert.equal(tr.current.chunk.size, 60);          // guessed from 10:00
+    assert.equal(tr.current.splits.length, 2);
+    tr.update({ splitIntervalTime: 120, splitIntervalDistance: 461.5, splitIntervalNumber: 1 });
+    assert.equal(tr.current.chunk.size, 120);         // PM5 is set to 2:00 splits
+    assert.equal(tr.current.splits.length, 1);
+    assert.equal(tr.current.splits[0].rate, 22);
+    assert.equal(tr.current.splits[0].hr, 130);
+    for (; t <= 599.8; t += 0.5) tr.update({ elapsedTime: t, distance: (t * 500) / 130 });
+    tr.update({ splitIntervalTime: 120, splitIntervalDistance: 461.5, splitIntervalNumber: 2 });
+    assert.equal(tr.current.chunk.size, 120);
+    tr.update({ workoutState: 10 });
+    assert.equal(tr.pieces.length, 1);
+    assert.equal(tr.pieces[0].splits.length, 5);
+    assert.equal(tr.pieces[0].splits[4].mark, 600);
+});
+
+test('interval pieces are not re-cut by their own end-of-interval report', () => {
+    const tr = new SplitTracker();
+    tr.update({ workoutDuration: 2000, workoutDurationType: 0x80, workoutState: 5 });
+    for (let t = 0.5; ; t += 0.5) { const d = (t * 500) / 116; tr.update({ elapsedTime: t, distance: d }); if (d >= 2000) break; }
+    tr.update({ splitIntervalTime: 464, splitIntervalDistance: 2000, splitIntervalNumber: 1 });
+    assert.equal(tr.pieces[0].chunk.size, 250);
+    assert.equal(tr.pieces[0].splits.length, 8);
+});

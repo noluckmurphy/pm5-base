@@ -194,12 +194,12 @@ body.has-toolbar:not(.toolbar-hidden) #board { padding-top: 56px; }
 }
 
 /* ---------- rest coaching cards (#10) ---------- */
-#coach {
+#coach, #wods {
     position: absolute; left: 2vw; right: 2vw; top: 17vh; bottom: 8vh; z-index: 5;
     background: var(--tile); border-top: .6vh solid var(--accent); border-radius: var(--radius);
     padding: 2.6vh 2.4vw; display: flex; flex-direction: column; box-shadow: 0 1vh 4vh rgba(0,0,0,.5);
 }
-#coach[hidden] { display: none; }
+#coach[hidden], #wods[hidden] { display: none; }
 .coach-head { display: flex; justify-content: space-between; align-items: baseline; font-family: var(--num); text-transform: uppercase; }
 #coach-title { font-size: 5.6vh; font-weight: 800; letter-spacing: .02em; }
 #coach-page { font-size: 2.6vh; font-weight: 700; color: var(--muted); letter-spacing: .14em; }
@@ -225,3 +225,12 @@ body.has-toolbar:not(.toolbar-hidden) #board { padding-top: 56px; }
 }
 #rpe-scale span.on { background: var(--accent); color: #fff; }
 #rpe-hint { font-size: 2.7vh; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- PM5-only workout ideas ---------- */
+#wods-title { font-size: 5.6vh; font-weight: 800; letter-spacing: .02em; }
+#wods-page { font-size: 2.8vh; font-weight: 700; color: var(--muted); letter-spacing: .1em; white-space: pre; }
+#wods-list { list-style: none; margin-top: 1.8vh; flex: 1; display: flex; flex-direction: column; gap: 1.5vh; overflow: hidden; }
+#wods-list li { border-left: .5vw solid var(--accent); padding-left: 1.2vw; }
+.wod-head { display: flex; justify-content: space-between; font-family: var(--num); font-size: 3.8vh; font-weight: 700; }
+.wod-min { color: var(--muted); }
+.wod-how { font-size: 2.4vh; color: var(--muted); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
