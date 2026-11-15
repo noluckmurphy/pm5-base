@@ -65,34 +65,73 @@ let state = {};
 const tracker = new SplitTracker();
 let renderQueued = false;
 
-const resetSession = () => { state = {}; tracker.reset(); session = { startedAt: null, saved: null }; queueRender(); };
+const resetSession = () => { state = {}; tracker.reset(); session = newSession(); clearTimeout(saveTimer); saveTimer = null; queueRender(); };
 
 // ---------- end-of-workout session file (#11) ----------
-// Saved a few seconds after the PM5 says the workout is over, so its final
-// interval figures have arrived. The Android app writes it to the TV and
-// uploads it to the repo's workout-logs branch.
-let session = { startedAt: null, saved: null };     // saved: null | 'saving' | { ok, msg, name }
+// Once the PM5 says the workout is over, the summary screen asks for an RPE
+// (1-10, remote or keyboard). OK saves it; doing nothing saves with rpe null
+// after RPE_WAIT. Either way the save waits at least SAVE_DELAY after the
+// finish, so the PM5's final interval figures have arrived. The Android app
+// writes the file to the TV and uploads it to the repo's workout-logs branch.
+const SAVE_DELAY = 5000;
+const RPE_WAIT = 120000;
+const newSession = () => ({ startedAt: null, finishedAt: null, rpe: null, rpeDone: false, saved: null });
+let session = newSession();     // saved: null | 'saving' | { ok, msg, name }
 let saveTimer = null;
+let rpeTicker = null;
 
 function noteSession() {
     if (!session.startedAt && tracker.pieces.length) session.startedAt = new Date().toISOString();
-    if (tracker.finished && !session.saved && !saveTimer && tracker.pieces.some(p => p.splits.length)) {
-        saveTimer = setTimeout(saveSession, 5000);
+    if (tracker.finished && !session.finishedAt && tracker.pieces.some(p => p.splits.length)) {
+        session.finishedAt = Date.now();
+        scheduleSave(RPE_WAIT);
+        saveDraft();
+        clearInterval(rpeTicker);
+        rpeTicker = setInterval(() => { if (session.saved) clearInterval(rpeTicker); queueRender(); }, 1000);
     }
-    if (!tracker.pieces.length && session.startedAt) session = { startedAt: null, saved: null };
+    if (!tracker.pieces.length && session.startedAt) { session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
+}
+
+// The session file with rpe null, kept on the TV in case the app is closed
+// before an RPE is entered; the Android app uploads it then.
+let draftTimer = null;
+function saveDraft() {
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(() => {
+        if (session.saved || !window.PM5Android?.saveDraft) return;
+        const summary = buildSummary(null);
+        try { window.PM5Android.saveDraft(summaryLogic.fileName(summary), JSON.stringify(summary)); } catch { /* old app */ }
+    }, SAVE_DELAY);
+}
+
+function buildSummary(rpe) {
+    let appVersion = null;
+    try { appVersion = window.PM5Android?.appVersion() ?? null; } catch { /* old app */ }
+    return summaryLogic.build(tracker, target(), {
+        startedAt: session.startedAt, endedAt: new Date().toISOString(),
+        date: todayKey(), planSource, appVersion, rpe,
+    });
+}
+
+function scheduleSave(after) {
+    clearTimeout(saveTimer);
+    const wait = Math.max(after, SAVE_DELAY) - (Date.now() - session.finishedAt);
+    saveTimer = setTimeout(saveSession, Math.max(0, wait));
+}
+
+// OK on the summary screen: save now (or as soon as SAVE_DELAY allows).
+function confirmRpe() {
+    session.rpeDone = true;
+    scheduleSave(0);
+    queueRender();
 }
 
 function saveSession() {
     saveTimer = null;
     if (session.saved) return;
-    let appVersion = null;
-    try { appVersion = window.PM5Android?.appVersion() ?? null; } catch { /* old app */ }
-    const summary = summaryLogic.build(tracker, target(), {
-        startedAt: session.startedAt, endedAt: new Date().toISOString(),
-        date: todayKey(), planSource, appVersion,
-    });
+    const summary = buildSummary(session.rpe);
     const name = summaryLogic.fileName(summary);
-    console.info(`[ergtv] session file ${name}`);
+    console.info(`[ergtv] session file ${name} rpe=${session.rpe ?? 'skipped'}`);
     if (window.PM5Android?.saveWorkout) {
         session.saved = 'saving';
         window.PM5Android.saveWorkout(name, JSON.stringify(summary));
@@ -174,6 +213,7 @@ function renderBreakdown(t, hasTarget) {
     const resting = tvLogic.isRest(state.workoutState);
     const finished = tvLogic.isFinished(state.workoutState);
     const rowsEl = $('#bd-rows');
+    renderRpe();
 
     if (!piece) {
         setText($('#bd-title'), 'Ready');
@@ -327,8 +367,31 @@ function renderSummary(t, hasTarget) {
     if (avgs.length > 1) foot.push(`spread ${(Math.max(...avgs) - Math.min(...avgs)).toFixed(1)}s`);
     setText($('#bd-avg'), foot.join('  ·  '));
     const sv = session.saved;
-    setText($('#bd-pieces'), !sv ? 'Saving to your log…' : sv === 'saving' ? 'Saving to your log…'
-        : sv.ok ? 'Saved to your log ✓' : `Not in your log yet: ${sv.msg}`);
+    const rpeTxt = session.rpe ? `RPE ${session.rpe} · ` : '';
+    setText($('#bd-pieces'), !sv ? (session.rpeDone ? 'Saving to your log…' : '')
+        : sv === 'saving' ? `${rpeTxt}Saving to your log…`
+        : sv.ok ? `${rpeTxt}Saved to your log ✓` : `${rpeTxt}Not in your log yet: ${sv.msg}`);
+    renderRpe();
+}
+
+// RPE picker on the summary screen, until the session file is saved.
+function renderRpe() {
+    const el = $('#rpe');
+    const asking = tracker.finished && !!session.finishedAt && !session.saved && !session.rpeDone;
+    el.hidden = !asking;
+    if (!asking) return;
+    const boxes = $('#rpe-scale');
+    if (boxes.children.length !== 10) {
+        boxes.replaceChildren(...Array.from({ length: 10 }, (_, i) => {
+            const b = document.createElement('span'); b.textContent = String(i + 1); return b;
+        }));
+    }
+    [...boxes.children].forEach((b, i) => b.classList.toggle('on', session.rpe === i + 1));
+    setText($('#rpe-word'), summaryLogic.rpeWord(session.rpe));
+    const left = Math.max(0, Math.ceil((RPE_WAIT - (Date.now() - session.finishedAt)) / 1000));
+    setText($('#rpe-hint'), session.rpe
+        ? `OK save · saves anyway in ${tvLogic.formatClock(left)}`
+        : `← → or 1–0 pick · OK skip · saves without it in ${tvLogic.formatClock(left)}`);
 }
 
 // ---------- rest coaching cards (#10) ----------
@@ -546,6 +609,17 @@ function onKey(e) {
         toast('Remote locked while rowing. Change it in the rest.');
         e.preventDefault();
         return;
+    }
+    // Summary screen: arrows and digits pick the RPE, OK saves the session.
+    if (tracker.finished && session.finishedAt && !session.saved && !session.rpeDone) {
+        const step = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
+        const digit = summaryLogic.rpeFromKey(e.key);
+        if (step || digit || e.key === 'Enter') {
+            if (step) session.rpe = summaryLogic.stepRpe(session.rpe, step);
+            else if (digit) session.rpe = digit;
+            else confirmRpe();
+            queueRender(); e.preventDefault(); return;
+        }
     }
     // During a long rest the arrows flip coaching cards and OK hides them.
     const longRest = tvLogic.isRest(state.workoutState) && !tracker.finished

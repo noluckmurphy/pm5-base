@@ -17,6 +17,10 @@ import java.util.concurrent.Executors
  * `github-token` (put there once with `adb ... run-as`, see README), and
  * only this class reads it. Without a token, or offline, files stay in
  * `workouts/pending/` and go up on the next save or app start.
+ *
+ * While the summary screen waits for an RPE, the page keeps a draft (the
+ * same file with rpe null) in `workouts/draft/`. If the app closes before
+ * the RPE is entered, the draft is uploaded instead (see [flushDrafts]).
  */
 class WorkoutSaver(private val context: Context, private val onResult: (String, Boolean, String) -> Unit) {
 
@@ -29,12 +33,14 @@ class WorkoutSaver(private val context: Context, private val onResult: (String, 
 
     private val io = Executors.newSingleThreadExecutor()
     private val pending get() = File(context.filesDir, "workouts/pending").apply { mkdirs() }
+    private val drafts get() = File(context.filesDir, "workouts/draft").apply { mkdirs() }
     private val sent get() = File(context.filesDir, "workouts/sent").apply { mkdirs() }
 
     fun save(name: String, json: String) {
         if (!SAFE_NAME.matches(name)) { onResult(name, false, "bad file name"); return }
         io.execute {
             try {
+                File(drafts, name).delete()
                 File(pending, name).writeText(json)
                 Log.i(TAG, "workout saved on TV: $name")
             } catch (e: Exception) {
@@ -43,6 +49,23 @@ class WorkoutSaver(private val context: Context, private val onResult: (String, 
             }
             uploadAllNow()
         }
+    }
+
+    fun saveDraft(name: String, json: String) {
+        if (!SAFE_NAME.matches(name)) return
+        io.execute {
+            try { File(drafts, name).writeText(json); Log.i(TAG, "workout draft on TV: $name") }
+            catch (e: Exception) { Log.w(TAG, "draft $name: ${e.message}") }
+        }
+    }
+
+    /** App closing (or starting after a close): drafts nobody finished go up as they are. */
+    fun flushDrafts() = io.execute {
+        drafts.listFiles()?.forEach { f ->
+            val dest = File(pending, f.name)
+            if (dest.exists() || File(sent, f.name).exists()) f.delete() else f.renameTo(dest)
+        }
+        uploadAllNow()
     }
 
     fun uploadPending() = io.execute { uploadAllNow() }

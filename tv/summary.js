@@ -7,6 +7,7 @@
 // {
 //   version: 1, app: 'erg-tv', appVersion,
 //   startedAt, endedAt,                 // ISO, TV clock
+//   rpe,                                // 1-10 from the summary screen, null if skipped
 //   plan: { date, label, preset, fast, slow, rateLo, rateHi, shift, source },
 //   program: { kind: 'distance'|'time'|'just-row', total, rest },
 //   pieces: [{
@@ -60,7 +61,29 @@ const summaryLogic = {
         };
     },
 
-    // tracker: SplitTracker; target: app.js target(); extra: { planDay, planSource, appVersion, startedAt, endedAt }
+    // RPE 1-10, or null.
+    validRpe(v) {
+        return Number.isInteger(v) && v >= 1 && v <= 10 ? v : null;
+    },
+
+    // One arrow press. Nothing picked yet starts in the middle of the scale.
+    stepRpe(rpe, delta) {
+        if (!summaryLogic.validRpe(rpe)) return 5;
+        return Math.min(10, Math.max(1, rpe + delta));
+    },
+
+    // Number keys (remote or keyboard): 1-9, and 0 for 10.
+    rpeFromKey(key) {
+        if (!/^[0-9]$/.test(key)) return null;
+        return key === '0' ? 10 : Number(key);
+    },
+
+    rpeWord(rpe) {
+        if (!rpe) return 'How hard was that?';
+        return ['', 'Very easy', 'Easy', 'Easy', 'Steady', 'Steady', 'Somewhat hard', 'Hard', 'Very hard', 'Near max', 'All out'][rpe];
+    },
+
+    // tracker: SplitTracker; target: app.js target(); extra: { date, planSource, appVersion, startedAt, endedAt, rpe }
     build(tracker, target, extra = {}) {
         const pieces = tracker.pieces.filter(p => p.splits.length).map((p, i) => summaryLogic.piece(p, i + 1));
         const r = summaryLogic.round;
@@ -75,6 +98,7 @@ const summaryLogic = {
             appVersion: extra.appVersion ?? null,
             startedAt: extra.startedAt ?? null,
             endedAt: extra.endedAt ?? null,
+            rpe: summaryLogic.validRpe(extra.rpe),
             plan: {
                 date: extra.date ?? null,
                 label: target?.label ?? null,

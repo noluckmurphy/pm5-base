@@ -85,7 +85,7 @@ class MainActivity : Activity() {
         web.requestFocus()
         web.loadUrl("https://appassets.androidplatform.net/assets/web/tv/index.html?native=1")
         hideSystemUi()
-        saver.uploadPending()
+        saver.flushDrafts()
     }
 
     private fun q(s: String) = JSONObject.quote(s)
@@ -112,6 +112,9 @@ class MainActivity : Activity() {
 
         @JavascriptInterface
         fun saveWorkout(name: String, json: String) = saver.save(name, json)
+
+        @JavascriptInterface
+        fun saveDraft(name: String, json: String) = saver.saveDraft(name, json)
 
         @JavascriptInterface
         fun appVersion(): String = packageManager.getPackageInfo(packageName, 0).versionName ?: ""
@@ -159,6 +162,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        saver.flushDrafts()
         link.stop()
         web.destroy()
         super.onDestroy()
