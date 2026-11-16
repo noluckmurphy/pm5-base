@@ -230,6 +230,17 @@ class SplitTracker {
         this._pendingAvg = null;
     }
 
+    // hold: while true, a finished workout stays on the board when the PM5
+    // goes back to idle (Menu), so its summary can still be saved. The app
+    // sets it while the RPE prompt is up. beforeReset runs just before a
+    // finished workout is cleared for a new one.
+    _clear() {
+        if (this.pieces.some(p => p.splits.length)) this.beforeReset?.();
+        const keep = { hold: this.hold, beforeReset: this.beforeReset, generation: (this.generation ?? 0) + 1 };
+        this.reset();
+        Object.assign(this, keep);
+    }
+
     get working() {
         return this.state === undefined || WORK_STATES.includes(this.state);
     }
@@ -264,7 +275,7 @@ class SplitTracker {
         for (const k of prog) {
             if (data[k] === undefined) continue;
             if (this.program[k] !== undefined && this.program[k] !== data[k] && this.pieces.some(p => p.splits.length)) {
-                this.reset();
+                this._clear();
             }
             this.program[k] = data[k];
         }
@@ -304,12 +315,14 @@ class SplitTracker {
         }
 
         if (data.workoutState !== undefined) {
+            // Rowing again after a finished workout starts a new one.
+            if (this.finished && WORK_STATES.includes(data.workoutState)) this._clear();
             const was = this.state;
             this.state = data.workoutState;
             const nowWorking = WORK_STATES.includes(this.state);
             if (was !== undefined && WORK_STATES.includes(was) && !nowWorking) this._endPiece();
             if (DONE_STATES.includes(this.state)) this.finished = true;
-            if (this.state === 0 && this.finished) this.reset(), (this.state = 0);
+            if (this.state === 0 && this.finished && !this.hold) this._clear(), (this.state = 0);
             if (nowWorking) this._restMax = 0;
         }
         // The rest countdown starts at the programmed rest, so its highest

@@ -6,7 +6,7 @@ const coachLogic = {
 
     // Seconds of rest needed before the cards show up at all, and how long
     // before the rest ends they get out of the way.
-    MIN_REST: 90,
+    MIN_REST: 60,
     HIDE_BEFORE_END: 20,
 
     // Generic cues per preset, used when today's plan has no notes.

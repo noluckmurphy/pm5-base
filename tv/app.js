@@ -63,6 +63,9 @@ async function loadPlan() {
 let monitor = null;
 let state = {};
 const tracker = new SplitTracker();
+// Keep a finished workout on the board until its file is saved, even if the
+// PM5 goes back to its menu; a new workout programmed meanwhile saves it now.
+tracker.beforeReset = () => { if (session.finishedAt && !session.saved) saveSession(); };
 let renderQueued = false;
 
 const resetSession = () => { state = {}; tracker.reset(); session = newSession(); clearTimeout(saveTimer); saveTimer = null; queueRender(); };
@@ -75,12 +78,14 @@ const resetSession = () => { state = {}; tracker.reset(); session = newSession()
 // writes the file to the TV and uploads it to the repo's workout-logs branch.
 const SAVE_DELAY = 5000;
 const RPE_WAIT = 120000;
-const newSession = () => ({ startedAt: null, finishedAt: null, rpe: null, rpeDone: false, saved: null });
+const newSession = () => ({ startedAt: null, finishedAt: null, rpe: null, rpeDone: false, saved: null, gen: tracker.generation ?? 0 });
 let session = newSession();     // saved: null | 'saving' | { ok, msg, name }
 let saveTimer = null;
 let rpeTicker = null;
 
 function noteSession() {
+    // The tracker cleared a finished workout (its file is already saving).
+    if (session.gen !== (tracker.generation ?? 0)) { session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
     if (!session.startedAt && tracker.pieces.length) session.startedAt = new Date().toISOString();
     if (tracker.finished && !session.finishedAt && tracker.pieces.some(p => p.splits.length)) {
         session.finishedAt = Date.now();
@@ -90,6 +95,7 @@ function noteSession() {
         rpeTicker = setInterval(() => { if (session.saved) clearInterval(rpeTicker); queueRender(); }, 1000);
     }
     if (!tracker.pieces.length && session.startedAt) { session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
+    tracker.hold = !!session.finishedAt && (!session.saved || session.saved === 'saving');
 }
 
 // The session file with rpe null, kept on the TV in case the app is closed
@@ -98,7 +104,7 @@ let draftTimer = null;
 function saveDraft() {
     clearTimeout(draftTimer);
     draftTimer = setTimeout(() => {
-        if (session.saved || !window.PM5Android?.saveDraft) return;
+        if (session.saved || !window.PM5Android?.saveDraft || !tracker.pieces.length) return;
         const summary = buildSummary(null);
         try { window.PM5Android.saveDraft(summaryLogic.fileName(summary), JSON.stringify(summary)); } catch { /* old app */ }
     }, SAVE_DELAY);
@@ -143,7 +149,9 @@ function saveSession() {
 }
 
 window.ergtvSaved = (name, ok, msg) => {
+    if (session.saved !== 'saving') return;     // a newer session is up
     session.saved = { ok, msg, name };
+    tracker.hold = false;
     queueRender();
 };
 

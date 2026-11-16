@@ -15,10 +15,11 @@ test('parsePace reads m:ss.s and plain seconds', () => {
     assert.ok(Number.isNaN(L.parsePace('1:75')));
 });
 
-test('formatPace shows tenths and rounds like the PM5', () => {
+test('formatPace shows tenths and truncates like the PM5', () => {
     assert.equal(L.formatPace(115.5), '1:55.5');
     assert.equal(L.formatPace(105), '1:45.0');
-    assert.equal(L.formatPace(119.96), '2:00.0');
+    assert.equal(L.formatPace(119.96), '1:59.9');   // the PM5 truncates
+    assert.equal(L.formatPace(122.25), '2:02.2');
     assert.equal(L.formatPace(0), '-:--.-');
     assert.equal(L.formatPace(undefined), '-:--.-');
 });

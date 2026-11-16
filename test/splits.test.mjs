@@ -261,3 +261,49 @@ test("a single 500m uses the PM5's split times, including the last one that arri
     assert.ok(!(p.pm5Avg > 0));
     close(S.average(p), 100.4);
 });
+
+test('a finished workout stays up when the PM5 goes back to its menu while held', () => {
+    const t = new SplitTracker();
+    let saved = 0;
+    t.beforeReset = () => saved++;
+    t.update({ workoutType: 5, workoutDuration: 500, workoutDurationType: 128 });
+    t.update({ workoutState: 1, elapsedTime: 0, distance: 0 });
+    for (let s = 1; s <= 120; s++) t.update({ workoutState: 1, elapsedTime: s, distance: s * 4.2 });
+    t.update({ workoutState: 10, elapsedTime: 121, distance: 500 });
+    assert.equal(t.finished, true);
+    t.hold = true;                                   // RPE prompt is up
+    t.update({ workoutState: 0 });                   // Menu on the PM5
+    assert.equal(t.finished, true);
+    assert.ok(t.pieces.length > 0);
+    assert.equal(saved, 0);
+    t.hold = false;                                  // file saved
+    t.update({ workoutState: 0 });
+    assert.equal(t.finished, false);
+    assert.equal(t.pieces.length, 0);
+    assert.equal(t.generation, 1);
+    assert.equal(saved, 1);
+});
+
+test('rowing again or programming a new workout clears a held one (saving it first)', () => {
+    const t = new SplitTracker();
+    let saved = 0;
+    t.beforeReset = () => saved++;
+    const row = () => {
+        t.update({ workoutType: 5, workoutDuration: 500, workoutDurationType: 128 });
+        t.update({ workoutState: 1, elapsedTime: 0, distance: 0 });
+        for (let s = 1; s <= 120; s++) t.update({ workoutState: 1, elapsedTime: s, distance: s * 4.2 });
+        t.update({ workoutState: 10, elapsedTime: 121, distance: 500 });
+    };
+    row();
+    t.hold = true;
+    t.update({ workoutState: 1, elapsedTime: 0, distance: 0 });
+    assert.equal(saved, 1);
+    assert.equal(t.finished, false);
+    assert.equal(t.hold, true);                      // the app owns hold
+    t.hold = false;
+    row();
+    t.hold = true;
+    t.update({ workoutType: 5, workoutDuration: 1000, workoutDurationType: 128 });
+    assert.equal(saved, 2);
+    assert.equal(t.pieces.length, 0);
+});

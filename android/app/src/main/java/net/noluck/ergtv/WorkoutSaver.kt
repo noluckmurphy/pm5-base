@@ -63,6 +63,8 @@ class WorkoutSaver(private val context: Context, private val onResult: (String, 
     fun flushDrafts() = io.execute {
         drafts.listFiles()?.forEach { f ->
             val dest = File(pending, f.name)
+            // An empty draft (no pieces) is not a workout: drop it.
+            if (f.readText().contains("\"pieces\":[]")) { f.delete(); return@forEach }
             if (dest.exists() || File(sent, f.name).exists()) f.delete() else f.renameTo(dest)
         }
         uploadAllNow()
