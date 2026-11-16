@@ -17,7 +17,8 @@ const tvLogic = {
     // 115.46 -> "1:55.5". Tenths, like the PM5's own split display.
     formatPace(secs) {
         if (!Number.isFinite(secs) || secs <= 0 || secs > 3600) return '-:--.-';
-        const tenths = Math.round(secs * 10);
+        // Truncate like the PM5 does (2:02.25 shows as 2:02.2), so averages match it.
+        const tenths = Math.floor(secs * 10 + 1e-6);
         const m = Math.floor(tenths / 600);
         const s = (tenths % 600) / 10;
         return `${m}:${s.toFixed(1).padStart(4, '0')}`;

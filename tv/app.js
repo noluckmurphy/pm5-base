@@ -104,7 +104,7 @@ let draftTimer = null;
 function saveDraft() {
     clearTimeout(draftTimer);
     draftTimer = setTimeout(() => {
-        if (session.saved || !window.PM5Android?.saveDraft) return;
+        if (session.saved || !window.PM5Android?.saveDraft || !tracker.pieces.length) return;
         const summary = buildSummary(null);
         try { window.PM5Android.saveDraft(summaryLogic.fileName(summary), JSON.stringify(summary)); } catch { /* old app */ }
     }, SAVE_DELAY);
