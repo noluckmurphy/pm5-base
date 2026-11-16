@@ -234,9 +234,10 @@ class SplitTracker {
     // goes back to idle (Menu), so its summary can still be saved. The app
     // sets it while the RPE prompt is up. beforeReset runs just before a
     // finished workout is cleared for a new one.
-    _clear() {
+    _clear(reason = '') {
+        this.onLog?.(`tracker clear (${reason}) pieces=${this.pieces.length} finished=${this.finished} hold=${!!this.hold}`);
         if (this.pieces.some(p => p.splits.length)) this.beforeReset?.();
-        const keep = { hold: this.hold, beforeReset: this.beforeReset, generation: (this.generation ?? 0) + 1 };
+        const keep = { hold: this.hold, beforeReset: this.beforeReset, onLog: this.onLog, generation: (this.generation ?? 0) + 1 };
         this.reset();
         Object.assign(this, keep);
     }
@@ -274,8 +275,11 @@ class SplitTracker {
         const prog = ['workoutType', 'workoutDuration', 'workoutDurationType'];
         for (const k of prog) {
             if (data[k] === undefined) continue;
-            if (this.program[k] !== undefined && this.program[k] !== data[k] && this.pieces.some(p => p.splits.length)) {
-                this._clear();
+            // While a finished workout is held for its RPE, the PM5 going back to
+            // its menu reports a new programme (Just Row); that must not clear it.
+            if (this.program[k] !== undefined && this.program[k] !== data[k] && this.pieces.some(p => p.splits.length)
+                && !(this.finished && this.hold)) {
+                this._clear(`new programme ${k}=${data[k]}`);
             }
             this.program[k] = data[k];
         }
@@ -316,13 +320,16 @@ class SplitTracker {
 
         if (data.workoutState !== undefined) {
             // Rowing again after a finished workout starts a new one.
-            if (this.finished && WORK_STATES.includes(data.workoutState)) this._clear();
+            if (this.finished && WORK_STATES.includes(data.workoutState)) this._clear(`rowing again, state ${data.workoutState}`);
             const was = this.state;
             this.state = data.workoutState;
             const nowWorking = WORK_STATES.includes(this.state);
             if (was !== undefined && WORK_STATES.includes(was) && !nowWorking) this._endPiece();
-            if (DONE_STATES.includes(this.state)) this.finished = true;
-            if (this.state === 0 && this.finished && !this.hold) this._clear(), (this.state = 0);
+            if (DONE_STATES.includes(this.state) && !this.finished) {
+                this.finished = true;
+                this.onLog?.(`tracker finished state=${this.state} pieces=${this.pieces.length}`);
+            }
+            if (this.state === 0 && this.finished && !this.hold) this._clear('PM5 idle after save'), (this.state = 0);
             if (nowWorking) this._restMax = 0;
         }
         // The rest countdown starts at the programmed rest, so its highest

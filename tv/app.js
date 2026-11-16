@@ -75,7 +75,11 @@ let state = {};
 const tracker = new SplitTracker();
 // Keep a finished workout on the board until its file is saved, even if the
 // PM5 goes back to its menu; a new workout programmed meanwhile saves it now.
-tracker.beforeReset = () => { if (session.finishedAt && !session.saved) saveSession(); };
+tracker.beforeReset = () => { if (session.finishedAt && !session.saved) { slog('save now: workout cleared before RPE'); saveSession(); } };
+// Session/UI transitions for the TV log (adb logcat -s ErgTV), so lost-RPE
+// and lost-row bugs can be traced: one "[ergtv] ui …" line per transition.
+function slog(msg) { console.info(`[ergtv] ui ${msg} | state=${state.workoutState ?? ''} gen=${tracker.generation ?? 0} rpe=${session?.rpe ?? ''} saved=${typeof session?.saved === 'object' && session?.saved ? (session.saved.ok ? 'ok' : 'fail') : session?.saved ?? ''}`); }
+tracker.onLog = slog;
 let renderQueued = false;
 
 const resetSession = () => { state = {}; tracker.reset(); session = newSession(); clearTimeout(saveTimer); saveTimer = null; queueRender(); };
@@ -95,17 +99,20 @@ let rpeTicker = null;
 
 function noteSession() {
     // The tracker cleared a finished workout (its file is already saving).
-    if (session.gen !== (tracker.generation ?? 0)) { session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
+    if (session.gen !== (tracker.generation ?? 0)) { slog('session reset: tracker cleared'); session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
     if (!session.startedAt && tracker.pieces.length) session.startedAt = new Date().toISOString();
     if (tracker.finished && !session.finishedAt && tracker.pieces.some(p => p.splits.length)) {
         session.finishedAt = Date.now();
+        slog('finished: RPE prompt up');
         scheduleSave(RPE_WAIT);
         saveDraft();
         clearInterval(rpeTicker);
         rpeTicker = setInterval(() => { if (session.saved) clearInterval(rpeTicker); queueRender(); }, 1000);
     }
-    if (!tracker.pieces.length && session.startedAt) { session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
-    tracker.hold = !!session.finishedAt && (!session.saved || session.saved === 'saving');
+    if (!tracker.pieces.length && session.startedAt) { slog('session reset: no pieces'); session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
+    const hold = !!session.finishedAt && (!session.saved || session.saved === 'saving');
+    if (hold !== !!tracker.hold) slog(`hold ${hold ? 'on' : 'off'}`);
+    tracker.hold = hold;
 }
 
 // The session file with rpe null, kept on the TV in case the app is closed
@@ -137,6 +144,7 @@ function scheduleSave(after) {
 
 // OK on the summary screen: save now (or as soon as SAVE_DELAY allows).
 function confirmRpe() {
+    slog('RPE confirmed');
     session.rpeDone = true;
     scheduleSave(0);
     queueRender();
@@ -159,6 +167,7 @@ function saveSession() {
 }
 
 window.ergtvSaved = (name, ok, msg) => {
+    console.info(`[ergtv] ui save result ${name} ok=${ok} ${msg ?? ''}`);
     if (session.saved !== 'saving') return;     // a newer session is up
     session.saved = { ok, msg, name };
     tracker.hold = false;
@@ -695,6 +704,7 @@ const arrowsLocked = (key) => {
 
 function onKey(e) {
     nudgeToolbar();
+    if (tracker.finished || session.finishedAt) slog(`key ${e.key} finished=${tracker.finished} asking=${!$('#rpe').hidden}`);
     if (e.key.startsWith('Arrow') && arrowsLocked(e.key)) {
         toast('Remote locked while rowing. Change it in the rest.');
         e.preventDefault();
@@ -708,6 +718,7 @@ function onKey(e) {
             if (step) session.rpe = summaryLogic.stepRpe(session.rpe, step);
             else if (digit) session.rpe = digit;
             else confirmRpe();
+            slog(`RPE key ${e.key}`);
             queueRender(); e.preventDefault(); return;
         }
     }

@@ -42,6 +42,8 @@ class MainActivity : Activity() {
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppLog.init(this)
+        AppLog.i("lifecycle onCreate")
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         link = PM5Link(
@@ -75,7 +77,10 @@ class MainActivity : Activity() {
             // `adb logcat -s ErgTV`.
             webChromeClient = object : WebChromeClient() {
                 override fun onConsoleMessage(m: ConsoleMessage): Boolean {
-                    Log.i("ErgTV", "${m.messageLevel()} ${m.message()}")
+                    // [ergtv] state, split and ui lines also go to the file log; the
+                    // 4/s status chatter stays in logcat only.
+                    if ((m.message().startsWith("[ergtv]") && !m.message().startsWith("[ergtv] status")) || m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) AppLog.i("${m.messageLevel()} ${m.message()}")
+                    else Log.i("ErgTV", "${m.messageLevel()} ${m.message()}")
                     return true
                 }
             }
@@ -143,7 +148,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        Log.i("ErgTV", "lifecycle onResume")
+        AppLog.i("lifecycle onResume")
         hideSystemUi()
         if (wantConnection && hasPermissions()) link.start()
     }
@@ -152,16 +157,17 @@ class MainActivity : Activity() {
     // app can connect to it.
     override fun onPause() {
         super.onPause()
-        Log.i("ErgTV", "lifecycle onPause")
+        AppLog.i("lifecycle onPause")
     }
 
     override fun onStop() {
         super.onStop()
-        Log.i("ErgTV", "lifecycle onStop")
+        AppLog.i("lifecycle onStop")
         link.stop()
     }
 
     override fun onDestroy() {
+        AppLog.i("lifecycle onDestroy")
         saver.flushDrafts()
         link.stop()
         web.destroy()

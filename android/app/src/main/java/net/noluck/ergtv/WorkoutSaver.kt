@@ -42,7 +42,7 @@ class WorkoutSaver(private val context: Context, private val onResult: (String, 
             try {
                 File(drafts, name).delete()
                 File(pending, name).writeText(json)
-                Log.i(TAG, "workout saved on TV: $name")
+                AppLog.i("workout saved on TV: $name")
             } catch (e: Exception) {
                 onResult(name, false, "could not save on the TV: ${e.message}")
                 return@execute
@@ -54,18 +54,21 @@ class WorkoutSaver(private val context: Context, private val onResult: (String, 
     fun saveDraft(name: String, json: String) {
         if (!SAFE_NAME.matches(name)) return
         io.execute {
-            try { File(drafts, name).writeText(json); Log.i(TAG, "workout draft on TV: $name") }
-            catch (e: Exception) { Log.w(TAG, "draft $name: ${e.message}") }
+            try { File(drafts, name).writeText(json); AppLog.i("workout draft on TV: $name") }
+            catch (e: Exception) { AppLog.w("draft $name: ${e.message}") }
         }
     }
 
     /** App closing (or starting after a close): drafts nobody finished go up as they are. */
     fun flushDrafts() = io.execute {
-        drafts.listFiles()?.forEach { f ->
+        val list = drafts.listFiles().orEmpty()
+        AppLog.i("drafts flush: ${list.size} file(s)")
+        list.forEach { f ->
             val dest = File(pending, f.name)
             // An empty draft (no pieces) is not a workout: drop it.
-            if (f.readText().contains("\"pieces\":[]")) { f.delete(); return@forEach }
-            if (dest.exists() || File(sent, f.name).exists()) f.delete() else f.renameTo(dest)
+            if (f.readText().contains("\"pieces\":[]")) { AppLog.i("draft dropped (empty): ${f.name}"); f.delete(); return@forEach }
+            if (dest.exists() || File(sent, f.name).exists()) { AppLog.i("draft dropped (already saved): ${f.name}"); f.delete() }
+            else { AppLog.i("draft -> pending: ${f.name}"); f.renameTo(dest) }
         }
         uploadAllNow()
     }
@@ -79,6 +82,7 @@ class WorkoutSaver(private val context: Context, private val onResult: (String, 
         val files = pending.listFiles()?.sortedBy { it.name } ?: return
         if (files.isEmpty()) return
         val tok = token()
+        AppLog.i("upload: ${files.size} pending, token=${tok != null}")
         if (tok == null) {
             files.forEach { onResult(it.name, false, "saved on the TV; no GitHub token yet") }
             return
@@ -86,7 +90,7 @@ class WorkoutSaver(private val context: Context, private val onResult: (String, 
         for (f in files) {
             val (ok, msg) = try { put(tok, f) } catch (e: Exception) { false to (e.message ?: "network error") }
             if (ok) f.renameTo(File(sent, f.name))
-            Log.i(TAG, "workout upload ${f.name}: $ok $msg")
+            AppLog.i("workout upload ${f.name}: $ok $msg")
             onResult(f.name, ok, msg)
         }
     }

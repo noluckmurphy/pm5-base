@@ -302,8 +302,33 @@ test('rowing again or programming a new workout clears a held one (saving it fir
     assert.equal(t.hold, true);                      // the app owns hold
     t.hold = false;
     row();
-    t.hold = true;
+    t.hold = false;
     t.update({ workoutType: 5, workoutDuration: 1000, workoutDurationType: 128 });
-    assert.equal(saved, 2);
+    assert.equal(saved, 2);                          // not held: a new programme saves and clears
     assert.equal(t.pieces.length, 0);
+});
+
+test('Menu on an interval workout: idle programme report does not clear a held workout (Nov 16 bug)', () => {
+    const t = new SplitTracker();
+    let saved = 0;
+    t.beforeReset = () => saved++;
+    t.update({ workoutType: 7, workoutDuration: 500, workoutDurationType: 128 });
+    for (let rep = 0; rep < 2; rep++) {
+        t.update({ workoutState: 5, elapsedTime: 0, distance: 0 });
+        for (let s = 1; s <= 120; s++) t.update({ workoutState: 5, elapsedTime: s, distance: s * 4.2 });
+        t.update({ workoutState: 3 });
+    }
+    t.update({ workoutState: 11 });                  // Menu: terminate
+    assert.equal(t.finished, true);
+    t.hold = true;                                   // RPE prompt is up
+    t.update({ workoutState: 13 });
+    t.update({ workoutState: 0, workoutDuration: 0, workoutType: 1 });   // exactly what the PM5 sent
+    t.update({ intervalCount: 0 });
+    assert.equal(t.finished, true);
+    assert.equal(t.pieces.length, 2);
+    assert.equal(saved, 0);
+    t.hold = false;                                  // saved with RPE
+    t.update({ workoutState: 0 });
+    assert.equal(t.pieces.length, 0);
+    assert.equal(saved, 1);
 });
