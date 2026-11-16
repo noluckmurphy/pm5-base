@@ -125,6 +125,61 @@ const tvLogic = {
         return (fast + slow) / 2;
     },
 
+    // ---------- the TV's own pace boat (#29) ----------
+    // The PM5 doesn't send its pace boat setting over Bluetooth, so the TV
+    // keeps its own. In a plan mode the boat sits inside the band (middle by
+    // default, nudged 0.5s with the remote) and the band still colours the
+    // splits. In PM5-only mode the boat is the target: off until set, then a
+    // band of BOAT_BAND either side of it.
+    BOAT_STEP: 0.5,
+    BOAT_BAND: 1,
+    BOAT_START: 130,              // first PM5-only boat: 2:10.0
+    BOAT_MIN: 85, BOAT_MAX: 180,  // 1:25.0 to 3:00.0; stepping past 3:00 turns a PM5-only boat off
+
+    // Boat pace (sec/500m) for a band, or null. `boat` is the set value
+    // (null = middle of the band); it's kept inside the band.
+    boatInBand(fast, slow, boat) {
+        if (!Number.isFinite(fast) || !Number.isFinite(slow)) return null;
+        const [lo, hi] = fast <= slow ? [fast, slow] : [slow, fast];
+        if (!Number.isFinite(boat)) return (lo + hi) / 2;
+        return Math.min(hi, Math.max(lo, boat));
+    },
+
+    // Next boat value after one remote step (dir -1 = faster, +1 = slower).
+    // With a band the boat stays inside it; without one (PM5-only) it starts
+    // at BOAT_START and turns off (null) past BOAT_MAX.
+    stepBoat(boat, dir, band = null) {
+        const step = tvLogic.BOAT_STEP * Math.sign(dir);
+        if (band) {
+            const cur = tvLogic.boatInBand(band.fast, band.slow, boat);
+            return cur === null ? null : tvLogic.boatInBand(band.fast, band.slow, Math.round((cur + step) * 2) / 2);
+        }
+        if (!Number.isFinite(boat)) return dir < 0 ? tvLogic.BOAT_START : null;
+        const next = Math.round((boat + step) * 2) / 2;
+        if (next > tvLogic.BOAT_MAX) return null;
+        return Math.max(tvLogic.BOAT_MIN, next);
+    },
+
+    // Band around a PM5-only boat.
+    boatBand(boat) {
+        return Number.isFinite(boat) ? { fast: boat - tvLogic.BOAT_BAND, slow: boat + tvLogic.BOAT_BAND } : null;
+    },
+
+    // Where the rower's dot sits on the race strip: 0..1, boat at 0.5,
+    // `scale` metres either side reaching the ends.
+    stripPos(gap, scale = 25) {
+        if (!Number.isFinite(gap)) return 0.5;
+        return Math.min(1, Math.max(0, 0.5 + gap / (2 * scale)));
+    },
+
+    // Short gap text under the strip.
+    boatGapText(gap, boat) {
+        if (!Number.isFinite(gap) || !Number.isFinite(boat)) return '';
+        const m = Math.round(gap);
+        const b = tvLogic.formatPace(boat);
+        return m === 0 ? `Level with ${b} boat` : `${m > 0 ? '+' : '−'}${Math.abs(m)}m vs ${b} boat`;
+    },
+
     // Session presets from Kyle's current plan (rowing/current-plan.md).
     // Paces are sec/500m. Edit freely; the settings dialog can override
     // any of them for the current session.

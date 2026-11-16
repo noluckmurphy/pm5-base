@@ -29,7 +29,8 @@ const todayKey = () => {
 // ---------- targets: plan for today, remote override on top ----------
 let planDay = null;                      // from today.json
 let planSource = 'none';                 // 'live' | 'bundled' | 'none'
-let manual = saved.manual?.date === todayKey() ? saved.manual : null;   // { date, preset, shift }
+let manual = saved.manual?.date === todayKey() ? saved.manual : null;   // { date, preset, shift, boat }
+let freeBoat = Number.isFinite(saved.freeBoat) ? saved.freeBoat : null;  // PM5-only boat, kept across days
 const hrBounds = saved.hrBounds ?? [...tvLogic.DEFAULT_HR_BOUNDS];
 
 const target = () => {
@@ -39,10 +40,19 @@ const target = () => {
         ? { ...tvLogic.PRESETS[planDay.preset], ...planDay }
         : { ...tvLogic.PRESETS[saved.lastPreset ?? 'threshold'], preset: saved.lastPreset ?? 'threshold' };
     const shift = manual?.shift ?? 0;
-    return { ...base, fast: base.fast + shift, slow: base.slow + shift, shift, fromPlan: !manual?.preset && !!planDay };
+    const t = { ...base, fast: base.fast + shift, slow: base.slow + shift, shift, fromPlan: !manual?.preset && !!planDay };
+    // The TV's own pace boat (#29): inside the band, or the target itself in PM5-only mode.
+    if (Number.isFinite(t.fast) && Number.isFinite(t.slow)) {
+        t.boat = tvLogic.boatInBand(t.fast, t.slow, manual?.boat);
+    } else if (t.preset === 'free' && Number.isFinite(freeBoat)) {
+        Object.assign(t, tvLogic.boatBand(freeBoat), { boat: freeBoat, boatOnly: true });
+    } else {
+        t.boat = null;
+    }
+    return t;
 };
 
-const persist = () => store.save({ ...saved, manual, hrBounds, lastPreset: target().preset });
+const persist = () => store.save({ ...saved, manual, hrBounds, freeBoat, lastPreset: target().preset });
 
 async function loadPlan() {
     const urls = NATIVE || location.hostname.endsWith('github.io') ? [`${PLAN_URL}?t=${Date.now()}`, 'today.json'] : ['today.json'];
@@ -529,16 +539,21 @@ function renderLive(t, hasTarget) {
         setText($('#togo'), Number.isFinite(s.distance) ? Math.floor(s.distance).toLocaleString() : '0');
     }
 
-    const gap = hasTarget && !resting ? tvLogic.boatGap(s.distance, s.elapsedTime, tvLogic.bandMid(t.fast, t.slow)) : null;
-    setText($('#boat'), gap === null ? '' : Math.round(gap) === 0 ? 'Level with target boat'
-        : `${Math.abs(Math.round(gap))}m ${gap > 0 ? 'ahead of' : 'behind'} target boat`);
+    const gap = Number.isFinite(t.boat) && !resting && !finished ? tvLogic.boatGap(s.distance, s.elapsedTime, t.boat) : null;
+    $('#boat').hidden = gap === null;
+    if (gap !== null) {
+        $('#boat-you').style.left = `${(tvLogic.stripPos(gap) * 100).toFixed(1)}%`;
+        $('#boat-you').dataset.side = Math.round(gap) > 0 ? 'ahead' : Math.round(gap) < 0 ? 'behind' : 'level';
+        setText($('#boat-text'), tvLogic.boatGapText(gap, t.boat));
+    }
 }
 
 function render() {
     const t = target();
     const hasTarget = Number.isFinite(t.fast) && Number.isFinite(t.slow);
     const src = t.fromPlan ? (planSource === 'live' ? 'Plan' : 'Plan (saved copy)') : manual?.preset ? 'Remote' : 'Default';
-    setText($('#target-label'), `${src}: ${t.label ?? ''}` + (t.shift ? ` (${t.shift > 0 ? '+' : '−'}${Math.abs(t.shift).toFixed(1)}s)` : ''));
+    setText($('#target-label'), `${src}: ${t.label ?? ''}` + (t.shift ? ` (${t.shift > 0 ? '+' : '−'}${Math.abs(t.shift).toFixed(1)}s)` : '')
+        + (Number.isFinite(t.boat) && !t.boatOnly ? ` · boat ${tvLogic.formatPace(t.boat)}` : ''));
     const piece = tracker.current ?? tracker.pieces[tracker.pieces.length - 1];
     const chunk = piece?.chunk ?? (tracker.program.workoutDurationType !== undefined
         ? splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType) : null);
@@ -546,13 +561,28 @@ function render() {
     const warn = $('#plan-warn');
     warn.hidden = !diff.length;
     setText(warn, diff.length ? `Doesn't match the plan: ${diff.join(' · ')}` : '');
-    setText($('#target-text'), hasTarget
-        ? `${tvLogic.formatPace(t.fast)}–${tvLogic.formatPace(t.slow)}` + (Number.isFinite(t.rateLo) ? ` · r${t.rateLo}–${t.rateHi}` : '')
-        : 'No target');
+    renderTargetText(t, hasTarget);
     renderBreakdown(t, hasTarget);
     renderLive(t, hasTarget);
     renderCoach(t);
     renderWods(t);
+}
+
+// Header target: the band with a tick for the boat, or the PM5-only boat.
+function renderTargetText(t, hasTarget) {
+    const el = $('#target-text');
+    const rate = Number.isFinite(t.rateLo) ? ` · r${t.rateLo}–${t.rateHi}` : '';
+    const key = !hasTarget ? 'none' : t.boatOnly ? `only:${t.boat}` : `band:${t.fast}:${t.slow}:${t.boat}:${rate}`;
+    if (el.dataset.key === key) return;
+    el.dataset.key = key;
+    if (!hasTarget) { el.textContent = 'No target · ↑ sets a boat'; return; }
+    if (t.boatOnly) { el.textContent = `Boat ${tvLogic.formatPace(t.boat)} · ±${tvLogic.BOAT_BAND}s`; return; }
+    const bar = document.createElement('span'); bar.className = 'band-bar';
+    const tick = document.createElement('span'); tick.className = 'band-tick';
+    const span = t.slow - t.fast;
+    tick.style.left = `${span > 0 ? ((t.boat - t.fast) / span) * 100 : 50}%`;
+    bar.append(tick);
+    el.replaceChildren(`${tvLogic.formatPace(t.fast)} `, bar, ` ${tvLogic.formatPace(t.slow)}${rate}`);
 }
 
 // ---------- connection status ----------
@@ -631,32 +661,41 @@ function changePreset(dir) {
     const cur = target().preset;
     const i = Math.max(0, PRESET_ORDER.indexOf(cur));
     const next = PRESET_ORDER[(i + dir + PRESET_ORDER.length) % PRESET_ORDER.length];
-    manual = { date: todayKey(), preset: next, shift: 0 };
+    manual = { date: todayKey(), preset: next, shift: 0, boat: null };
     persist();
     toast(tvLogic.PRESETS[next].label);
     queueRender();
 }
 
-function shiftTarget(delta) {
+// ↑/↓ move the pace boat (#29). In a plan mode it stays inside the band;
+// in PM5-only mode it is the target and turns off past 3:00.
+function moveBoat(dir) {
     const t = target();
-    if (!Number.isFinite(t.fast)) return;
-    manual = { date: todayKey(), preset: manual?.preset ?? null, shift: (manual?.shift ?? 0) + delta };
+    if (t.preset === 'free') {
+        freeBoat = tvLogic.stepBoat(freeBoat, dir);
+        toast(Number.isFinite(freeBoat) ? `Boat ${tvLogic.formatPace(freeBoat)}` : 'Boat off');
+    } else {
+        if (!Number.isFinite(t.fast)) return;
+        const boat = tvLogic.stepBoat(t.boat, dir, { fast: t.fast, slow: t.slow });
+        manual = { date: todayKey(), preset: manual?.preset ?? null, shift: manual?.shift ?? 0, boat };
+        toast(boat === t.boat ? `Boat ${tvLogic.formatPace(boat)} (edge of the band)` : `Boat ${tvLogic.formatPace(boat)}`);
+    }
     persist();
-    const nt = target();
-    toast(`Target ${tvLogic.formatPace(nt.fast)}–${tvLogic.formatPace(nt.slow)}`);
     queueRender();
 }
 
 // Locked while a piece is under way, so a bumped remote can't change the
 // target mid-piece. Free during rest, before the first stroke and after.
-const arrowsLocked = () => {
+const arrowsLocked = (key) => {
+    // PM5-only warm-ups are one long piece, so the boat can move while rowing.
+    if ((key === 'ArrowUp' || key === 'ArrowDown') && target().preset === 'free') return false;
     const p = tracker.current;
     return !!p && tracker.working && !tracker.finished && !!p.last && (p.last.d - p.origin.d) > 20;
 };
 
 function onKey(e) {
     nudgeToolbar();
-    if (e.key.startsWith('Arrow') && arrowsLocked()) {
+    if (e.key.startsWith('Arrow') && arrowsLocked(e.key)) {
         toast('Remote locked while rowing. Change it in the rest.');
         e.preventDefault();
         return;
@@ -688,11 +727,11 @@ function onKey(e) {
         case 'ArrowRight': changePreset(1); break;
         case 'ArrowUp':
             if (showingWods(target())) { wodBucket = Math.max(0, wodBucket - 1); queueRender(); }
-            else shiftTarget(-0.5);                   // faster
+            else moveBoat(-1);                        // faster
             break;
         case 'ArrowDown':
             if (showingWods(target())) { wodBucket = Math.min(wodLogic.BUCKETS.length - 1, wodBucket + 1); queueRender(); }
-            else shiftTarget(0.5);                    // slower
+            else moveBoat(1);                         // slower
             break;
         case 'Enter': {
             const h = $('#help');

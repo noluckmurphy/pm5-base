@@ -47,6 +47,7 @@ test('a 2×2000m session becomes a version-1 session file with the PM5 interval 
     assert.equal(s.totals.spread, 0.7);
     assert.equal(s.plan.source, 'live');
     assert.equal(s.plan.fast, 115.5);
+    assert.equal(s.plan.boat, null);
     JSON.parse(JSON.stringify(s));   // plain JSON, no NaN surprises
 });
 

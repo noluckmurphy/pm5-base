@@ -100,3 +100,33 @@ test('planMismatch flags a PM5 programme that differs from the plan', () => {
     assert.deepEqual(L.planMismatch(plan, { kind: 'distance', size: 500, total: 0 }), ['plan 2000m, PM5 just row']);
     assert.deepEqual(L.planMismatch(null, { kind: 'distance', size: 500, total: 0 }), []);
 });
+
+test('pace boat sits inside the band and steps 0.5s (#29)', () => {
+    assert.equal(L.boatInBand(128, 135, null), 131.5);
+    assert.equal(L.boatInBand(128, 135, 130), 130);
+    assert.equal(L.boatInBand(128, 135, 140), 135);
+    assert.equal(L.boatInBand(undefined, 135, 130), null);
+    const band = { fast: 128, slow: 135 };
+    assert.equal(L.stepBoat(null, -1, band), 131);
+    assert.equal(L.stepBoat(130, 1, band), 130.5);
+    assert.equal(L.stepBoat(128, -1, band), 128);       // stays at the fast edge
+});
+
+test('PM5-only boat starts at 2:10, turns off past 3:00, and makes a ±1s band (#29)', () => {
+    assert.equal(L.stepBoat(null, -1), 130);
+    assert.equal(L.stepBoat(null, 1), null);
+    assert.equal(L.stepBoat(130, 1), 130.5);
+    assert.equal(L.stepBoat(180, 1), null);
+    assert.equal(L.stepBoat(85, -1), 85);
+    assert.deepEqual(L.boatBand(130), { fast: 129, slow: 131 });
+    assert.equal(L.boatBand(null), null);
+});
+
+test('race strip position and gap text (#29)', () => {
+    assert.equal(L.stripPos(0), 0.5);
+    assert.equal(L.stripPos(12.5), 0.75);
+    assert.equal(L.stripPos(-100), 0);
+    assert.equal(L.boatGapText(6.4, 130), '+6m vs 2:10.0 boat');
+    assert.equal(L.boatGapText(-3, 130), '−3m vs 2:10.0 boat');
+    assert.equal(L.boatGapText(0.2, 130), 'Level with 2:10.0 boat');
+});

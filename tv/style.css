@@ -89,6 +89,16 @@ body.has-toolbar:not(.toolbar-hidden) #board { padding-top: 56px; }
 .bd-target > div { overflow: hidden; text-overflow: ellipsis; }
 #target-label { font-size: 2.4vh; color: var(--muted); font-weight: 600; white-space: nowrap; }
 #target-text { font-size: 4.6vh; font-weight: 700; white-space: nowrap; letter-spacing: .01em; }
+/* pace boat (#29): tick on the band in the header, race strip in the meters tile */
+.band-bar { display: inline-block; position: relative; width: 4.2vw; height: .9vh; margin: 0 .5vw; background: rgba(255,255,255,.18); border-radius: .45vh; vertical-align: middle; }
+.band-tick { position: absolute; top: -.8vh; width: .3vw; height: 2.5vh; margin-left: -.15vw; background: var(--accent); border-radius: .2vh; }
+#boat { width: 70%; margin-top: .6vh; }
+#boat-strip { position: relative; height: 1.4vh; background: rgba(255,255,255,.10); border-radius: .7vh; }
+#boat-mark { position: absolute; left: 50%; top: -.2vh; width: 1.8vh; height: 1.8vh; margin-left: -.9vh; border: .25vh solid #fff; border-radius: 50%; box-sizing: border-box; }
+#boat-you { position: absolute; top: -.2vh; width: 1.8vh; height: 1.8vh; margin-left: -.9vh; border-radius: 50%; background: var(--muted); transition: left .3s; }
+#boat-you[data-side="ahead"] { background: var(--on); }
+#boat-you[data-side="behind"] { background: var(--slow); }
+#boat-text { text-align: center; margin-top: .4vh; }
 #plan-warn { font-size: 2.3vh; font-weight: 700; color: var(--slow); margin-top: .5vh; white-space: nowrap; }
 #plan-warn[hidden] { display: none; }
 
@@ -187,7 +197,8 @@ body.has-toolbar:not(.toolbar-hidden) #board { padding-top: 56px; }
 #help .muted { color: var(--muted); font-size: 2.2vh; margin-top: 2vh; }
 
 #toast {
-    position: absolute; top: 3vh; left: 50%; transform: translateX(-50%); z-index: 12;
+    /* centred over the split table, clear of the header targets and the live tiles */
+    position: absolute; top: 50%; left: 35%; transform: translate(-50%, -50%); z-index: 12;
     background: rgba(6,18,41,.97); border-top: .6vh solid var(--accent); border-radius: var(--radius);
     padding: 1.4vh 3vw; font-size: 3.6vh; font-weight: 700; letter-spacing: .02em; transition: opacity .4s;
     box-shadow: 0 1vh 4vh rgba(0,0,0,.5);
