@@ -35,7 +35,8 @@ test('without plan notes the preset cues are used', () => {
 test('cards only show in long rests and get out of the way near the end', () => {
     assert.equal(C.visible({ resting: true, restSeconds: 300, restLeft: 250 }), true);
     assert.equal(C.visible({ resting: true, restSeconds: 300, restLeft: 15 }), false);
-    assert.equal(C.visible({ resting: true, restSeconds: 60, restLeft: 50 }), false);
+    assert.equal(C.visible({ resting: true, restSeconds: 60, restLeft: 50 }), true);   // 1:00 rests get cards too
+    assert.equal(C.visible({ resting: true, restSeconds: 45, restLeft: 40 }), false);
     assert.equal(C.visible({ resting: false, restSeconds: 300, restLeft: 250 }), false);
     assert.equal(C.visible({ resting: true, restSeconds: 300, restLeft: 250, dismissed: true }), false);
 });
