@@ -93,7 +93,10 @@
                 <div class="live-tile togo">
                     <div class="lbl"><span id="togo-label">Meters</span></div>
                     <div id="togo" class="big">0</div>
-                    <div id="boat" class="sub"></div>
+                    <div id="boat" hidden>
+                        <div id="boat-strip"><span id="boat-mark"></span><span id="boat-you"></span></div>
+                        <div id="boat-text" class="sub"></div>
+                    </div>
                 </div>
             </aside>
 
@@ -105,9 +108,9 @@
             <div id="help" hidden>
                 <h2>Remote</h2>
                 <p><b>← →</b> change session type</p>
-                <p><b>↑ ↓</b> make today's target 0.5s faster or slower</p>
-                <p class="muted">PM5 only: no targets, splits follow the PM5. Before you start, ↑ ↓ flip through Concept2 workout ideas by length.</p>
-                <p class="muted">Arrows are locked while a piece is under way.</p>
+                <p><b>↑ ↓</b> move the pace boat 0.5s faster or slower (it stays inside today's band)</p>
+                <p class="muted">PM5 only: no targets until you set a boat with ↑ (starts at 2:10, ±1s band; ↓ past 3:00 turns it off). Before you start, ↑ ↓ flip through Concept2 workout ideas by length.</p>
+                <p class="muted">Arrows are locked while a piece is under way (except the boat in PM5 only).</p>
                 <p><b>OK</b> show this help</p>
                 <p class="muted">In a long rest, coaching cards show up: ← → flip them, OK hides or brings them back.</p>
                 <p class="muted">When the workout's done: ← → or the number keys set your RPE (0 = 10), OK saves.</p>

@@ -8,7 +8,8 @@
 //   version: 1, app: 'erg-tv', appVersion,
 //   startedAt, endedAt,                 // ISO, TV clock
 //   rpe,                                // 1-10 from the summary screen, null if skipped
-//   plan: { date, label, preset, fast, slow, rateLo, rateHi, shift, source },
+//   plan: { date, label, preset, fast, slow, rateLo, rateHi, shift, boat, source },
+//     boat: the TV's pace boat in sec/500m (#29), or null
 //   program: { kind: 'distance'|'time'|'just-row', total, rest },
 //   pieces: [{
 //     n, kind, total, chunk,           // chunk = split length used
@@ -106,6 +107,7 @@ const summaryLogic = {
                 fast: num(target?.fast), slow: num(target?.slow),
                 rateLo: num(target?.rateLo), rateHi: num(target?.rateHi),
                 shift: target?.shift ?? 0,
+                boat: num(target?.boat),
                 source: target?.fromPlan ? (extra.planSource ?? 'plan') : 'manual',
             },
             program: {

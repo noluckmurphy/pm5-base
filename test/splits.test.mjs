@@ -20,7 +20,10 @@ test('chunkFor picks chunk sizes by piece length', () => {
     assert.deepEqual(S.chunkFor(2000, 0x80), { kind: 'distance', size: 250, total: 2000 });
     assert.deepEqual(S.chunkFor(5000, 0x80), { kind: 'distance', size: 500, total: 5000 });
     assert.deepEqual(S.chunkFor(60, 0x00), { kind: 'time', size: 30, total: 60 });
-    assert.deepEqual(S.chunkFor(1800, 0x00), { kind: 'time', size: 120, total: 1800 });
+    assert.deepEqual(S.chunkFor(1800, 0x00), { kind: 'time', size: 360, total: 1800 });   // PM5 default: a fifth
+    assert.deepEqual(S.chunkFor(1801, 0x00), { kind: 'time', size: 120, total: 1801 });
+    assert.deepEqual(S.chunkFor(1800, 0x00, { 'time:1800': 300 }), { kind: 'time', size: 300, total: 1800 });
+    assert.equal(S.chunkFor(2000, 0x80, { 'time:2000': 300 }).size, 250);   // other programme's split ignored
     assert.equal(S.chunkFor(undefined, undefined).size, 500);
 });
 
@@ -302,8 +305,52 @@ test('rowing again or programming a new workout clears a held one (saving it fir
     assert.equal(t.hold, true);                      // the app owns hold
     t.hold = false;
     row();
-    t.hold = true;
+    t.hold = false;
     t.update({ workoutType: 5, workoutDuration: 1000, workoutDurationType: 128 });
-    assert.equal(saved, 2);
+    assert.equal(saved, 2);                          // not held: a new programme saves and clears
     assert.equal(t.pieces.length, 0);
+});
+
+test('Menu on an interval workout: idle programme report does not clear a held workout (Nov 16 bug)', () => {
+    const t = new SplitTracker();
+    let saved = 0;
+    t.beforeReset = () => saved++;
+    t.update({ workoutType: 7, workoutDuration: 500, workoutDurationType: 128 });
+    for (let rep = 0; rep < 2; rep++) {
+        t.update({ workoutState: 5, elapsedTime: 0, distance: 0 });
+        for (let s = 1; s <= 120; s++) t.update({ workoutState: 5, elapsedTime: s, distance: s * 4.2 });
+        t.update({ workoutState: 3 });
+    }
+    t.update({ workoutState: 11 });                  // Menu: terminate
+    assert.equal(t.finished, true);
+    t.hold = true;                                   // RPE prompt is up
+    t.update({ workoutState: 13 });
+    t.update({ workoutState: 0, workoutDuration: 0, workoutType: 1 });   // exactly what the PM5 sent
+    t.update({ intervalCount: 0 });
+    assert.equal(t.finished, true);
+    assert.equal(t.pieces.length, 2);
+    assert.equal(saved, 0);
+    t.hold = false;                                  // saved with RPE
+    t.update({ workoutState: 0 });
+    assert.equal(t.pieces.length, 0);
+    assert.equal(saved, 1);
+});
+
+test('a learned PM5 split is used from the first stroke next time (Nov 20 30:00 row)', () => {
+    const tr = new SplitTracker();
+    const learned = [];
+    tr.onLearnSplit = (key, size, was) => learned.push([key, size, was]);
+    tr.update({ workoutDuration: 600, workoutDurationType: 0, workoutState: 1 });
+    let t = 0;
+    for (; t <= 120; t += 0.5) tr.update({ elapsedTime: t, distance: (t * 500) / 130 });
+    tr.update({ splitIntervalTime: 120, splitIntervalDistance: 461.5, splitIntervalNumber: 1 });
+    assert.deepEqual(learned, [['time:600', 120, 60]]);
+    tr.update({ workoutState: 10 });
+    // Menu, then the same 10:00 programme again: 2:00 rows from the start, no re-cut.
+    tr.update({ workoutState: 0 });
+    tr.update({ workoutDuration: 600, workoutDurationType: 0, workoutState: 1 });
+    for (t = 0; t <= 30; t += 0.5) tr.update({ elapsedTime: t, distance: (t * 500) / 130 });
+    assert.equal(tr.current.chunk.size, 120);
+    tr.update({ splitIntervalTime: 120, splitIntervalDistance: 461.5, splitIntervalNumber: 1 });
+    assert.equal(learned.length, 1);   // nothing new to learn
 });

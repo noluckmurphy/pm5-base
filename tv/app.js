@@ -29,7 +29,8 @@ const todayKey = () => {
 // ---------- targets: plan for today, remote override on top ----------
 let planDay = null;                      // from today.json
 let planSource = 'none';                 // 'live' | 'bundled' | 'none'
-let manual = saved.manual?.date === todayKey() ? saved.manual : null;   // { date, preset, shift }
+let manual = saved.manual?.date === todayKey() ? saved.manual : null;   // { date, preset, shift, boat }
+let freeBoat = Number.isFinite(saved.freeBoat) ? saved.freeBoat : null;  // PM5-only boat, kept across days
 const hrBounds = saved.hrBounds ?? [...tvLogic.DEFAULT_HR_BOUNDS];
 
 const target = () => {
@@ -39,10 +40,19 @@ const target = () => {
         ? { ...tvLogic.PRESETS[planDay.preset], ...planDay }
         : { ...tvLogic.PRESETS[saved.lastPreset ?? 'threshold'], preset: saved.lastPreset ?? 'threshold' };
     const shift = manual?.shift ?? 0;
-    return { ...base, fast: base.fast + shift, slow: base.slow + shift, shift, fromPlan: !manual?.preset && !!planDay };
+    const t = { ...base, fast: base.fast + shift, slow: base.slow + shift, shift, fromPlan: !manual?.preset && !!planDay };
+    // The TV's own pace boat (#29): inside the band, or the target itself in PM5-only mode.
+    if (Number.isFinite(t.fast) && Number.isFinite(t.slow)) {
+        t.boat = tvLogic.boatInBand(t.fast, t.slow, manual?.boat);
+    } else if (t.preset === 'free' && Number.isFinite(freeBoat)) {
+        Object.assign(t, tvLogic.boatBand(freeBoat), { boat: freeBoat, boatOnly: true });
+    } else {
+        t.boat = null;
+    }
+    return t;
 };
 
-const persist = () => store.save({ ...saved, manual, hrBounds, lastPreset: target().preset });
+const persist = () => store.save({ ...saved, manual, hrBounds, freeBoat, pm5Splits: tracker.knownSplits, lastPreset: target().preset });
 
 async function loadPlan() {
     const urls = NATIVE || location.hostname.endsWith('github.io') ? [`${PLAN_URL}?t=${Date.now()}`, 'today.json'] : ['today.json'];
@@ -65,7 +75,19 @@ let state = {};
 const tracker = new SplitTracker();
 // Keep a finished workout on the board until its file is saved, even if the
 // PM5 goes back to its menu; a new workout programmed meanwhile saves it now.
-tracker.beforeReset = () => { if (session.finishedAt && !session.saved) saveSession(); };
+tracker.beforeReset = () => { if (session.finishedAt && !session.saved) { slog('save now: workout cleared before RPE'); saveSession(); } };
+// Session/UI transitions for the TV log (adb logcat -s ErgTV), so lost-RPE
+// and lost-row bugs can be traced: one "[ergtv] ui …" line per transition.
+function slog(msg) { console.info(`[ergtv] ui ${msg} | state=${state.workoutState ?? ''} gen=${tracker.generation ?? 0} rpe=${session?.rpe ?? ''} saved=${typeof session?.saved === 'object' && session?.saved ? (session.saved.ok ? 'ok' : 'fail') : session?.saved ?? ''}`); }
+tracker.onLog = slog;
+// The PM5 doesn't say its split length until the first split ends, so the
+// first time a programme is rowed the board guesses, then re-cuts to the
+// PM5's splits. Remember them per programme so next time matches from the start.
+tracker.knownSplits = saved.pm5Splits && typeof saved.pm5Splits === 'object' ? { ...saved.pm5Splits } : {};
+tracker.onLearnSplit = (key, size, was) => {
+    persist();
+    if (size !== was) toast(`Splits now match the PM5: ${key.startsWith('time') ? tvLogic.formatClock(size) : `${size}m`} each`);
+};
 let renderQueued = false;
 
 const resetSession = () => { state = {}; tracker.reset(); session = newSession(); clearTimeout(saveTimer); saveTimer = null; queueRender(); };
@@ -85,17 +107,20 @@ let rpeTicker = null;
 
 function noteSession() {
     // The tracker cleared a finished workout (its file is already saving).
-    if (session.gen !== (tracker.generation ?? 0)) { session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
+    if (session.gen !== (tracker.generation ?? 0)) { slog('session reset: tracker cleared'); session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
     if (!session.startedAt && tracker.pieces.length) session.startedAt = new Date().toISOString();
     if (tracker.finished && !session.finishedAt && tracker.pieces.some(p => p.splits.length)) {
         session.finishedAt = Date.now();
+        slog('finished: RPE prompt up');
         scheduleSave(RPE_WAIT);
         saveDraft();
         clearInterval(rpeTicker);
         rpeTicker = setInterval(() => { if (session.saved) clearInterval(rpeTicker); queueRender(); }, 1000);
     }
-    if (!tracker.pieces.length && session.startedAt) { session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
-    tracker.hold = !!session.finishedAt && (!session.saved || session.saved === 'saving');
+    if (!tracker.pieces.length && session.startedAt) { slog('session reset: no pieces'); session = newSession(); clearTimeout(saveTimer); saveTimer = null; }
+    const hold = !!session.finishedAt && (!session.saved || session.saved === 'saving');
+    if (hold !== !!tracker.hold) slog(`hold ${hold ? 'on' : 'off'}`);
+    tracker.hold = hold;
 }
 
 // The session file with rpe null, kept on the TV in case the app is closed
@@ -127,6 +152,7 @@ function scheduleSave(after) {
 
 // OK on the summary screen: save now (or as soon as SAVE_DELAY allows).
 function confirmRpe() {
+    slog('RPE confirmed');
     session.rpeDone = true;
     scheduleSave(0);
     queueRender();
@@ -149,6 +175,7 @@ function saveSession() {
 }
 
 window.ergtvSaved = (name, ok, msg) => {
+    console.info(`[ergtv] ui save result ${name} ok=${ok} ${msg ?? ''}`);
     if (session.saved !== 'saving') return;     // a newer session is up
     session.saved = { ok, msg, name };
     tracker.hold = false;
@@ -222,7 +249,7 @@ const vsLastCell = (delta) => {
 // block), or null for Just Row / nothing programmed yet.
 function armedChunk() {
     if (tracker.pieces.length || tracker.finished || tracker.program.workoutDurationType === undefined) return null;
-    const chunk = splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType);
+    const chunk = splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType, tracker.knownSplits);
     return chunk.total > 0 ? chunk : null;
 }
 
@@ -391,9 +418,9 @@ function renderSummary(t, hasTarget) {
     setText($('#bd-avg'), foot.join('  ·  '));
     const sv = session.saved;
     const rpeTxt = session.rpe ? `RPE ${session.rpe} · ` : '';
-    setText($('#bd-pieces'), !sv ? (session.rpeDone ? 'Saving to your log…' : '')
-        : sv === 'saving' ? `${rpeTxt}Saving to your log…`
-        : sv.ok ? `${rpeTxt}Saved to your log ✓` : `${rpeTxt}Not in your log yet: ${sv.msg}`);
+    setText($('#bd-pieces'), !sv ? (session.rpeDone ? 'Saving to Erg TV log…' : '')
+        : sv === 'saving' ? `${rpeTxt}Saving to Erg TV log…`
+        : sv.ok ? `${rpeTxt}Saved to Erg TV log ✓ · not sent to Concept2 Logbook` : `${rpeTxt}Not in Erg TV log yet: ${sv.msg}`);
     renderRpe();
 }
 
@@ -529,30 +556,50 @@ function renderLive(t, hasTarget) {
         setText($('#togo'), Number.isFinite(s.distance) ? Math.floor(s.distance).toLocaleString() : '0');
     }
 
-    const gap = hasTarget && !resting ? tvLogic.boatGap(s.distance, s.elapsedTime, tvLogic.bandMid(t.fast, t.slow)) : null;
-    setText($('#boat'), gap === null ? '' : Math.round(gap) === 0 ? 'Level with target boat'
-        : `${Math.abs(Math.round(gap))}m ${gap > 0 ? 'ahead of' : 'behind'} target boat`);
+    const gap = Number.isFinite(t.boat) && !resting && !finished ? tvLogic.boatGap(s.distance, s.elapsedTime, t.boat) : null;
+    $('#boat').hidden = gap === null;
+    if (gap !== null) {
+        $('#boat-you').style.left = `${(tvLogic.stripPos(gap) * 100).toFixed(1)}%`;
+        $('#boat-you').dataset.side = Math.round(gap) > 0 ? 'ahead' : Math.round(gap) < 0 ? 'behind' : 'level';
+        setText($('#boat-text'), tvLogic.boatGapText(gap, t.boat));
+    }
 }
 
 function render() {
     const t = target();
     const hasTarget = Number.isFinite(t.fast) && Number.isFinite(t.slow);
     const src = t.fromPlan ? (planSource === 'live' ? 'Plan' : 'Plan (saved copy)') : manual?.preset ? 'Remote' : 'Default';
-    setText($('#target-label'), `${src}: ${t.label ?? ''}` + (t.shift ? ` (${t.shift > 0 ? '+' : '−'}${Math.abs(t.shift).toFixed(1)}s)` : ''));
+    setText($('#target-label'), `${src}: ${t.label ?? ''}` + (t.shift ? ` (${t.shift > 0 ? '+' : '−'}${Math.abs(t.shift).toFixed(1)}s)` : '')
+        + (Number.isFinite(t.boat) && !t.boatOnly ? ` · boat ${tvLogic.formatPace(t.boat)}` : ''));
     const piece = tracker.current ?? tracker.pieces[tracker.pieces.length - 1];
     const chunk = piece?.chunk ?? (tracker.program.workoutDurationType !== undefined
-        ? splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType) : null);
+        ? splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType, tracker.knownSplits) : null);
     const diff = t.fromPlan ? tvLogic.planMismatch(planDay?.piece, chunk, tracker.restSeconds) : [];
     const warn = $('#plan-warn');
     warn.hidden = !diff.length;
     setText(warn, diff.length ? `Doesn't match the plan: ${diff.join(' · ')}` : '');
-    setText($('#target-text'), hasTarget
-        ? `${tvLogic.formatPace(t.fast)}–${tvLogic.formatPace(t.slow)}` + (Number.isFinite(t.rateLo) ? ` · r${t.rateLo}–${t.rateHi}` : '')
-        : 'No target');
+    renderTargetText(t, hasTarget);
     renderBreakdown(t, hasTarget);
     renderLive(t, hasTarget);
     renderCoach(t);
     renderWods(t);
+}
+
+// Header target: the band with a tick for the boat, or the PM5-only boat.
+function renderTargetText(t, hasTarget) {
+    const el = $('#target-text');
+    const rate = Number.isFinite(t.rateLo) ? ` · r${t.rateLo}–${t.rateHi}` : '';
+    const key = !hasTarget ? 'none' : t.boatOnly ? `only:${t.boat}` : `band:${t.fast}:${t.slow}:${t.boat}:${rate}`;
+    if (el.dataset.key === key) return;
+    el.dataset.key = key;
+    if (!hasTarget) { el.textContent = 'No target · ↑ sets a boat'; return; }
+    if (t.boatOnly) { el.textContent = `Boat ${tvLogic.formatPace(t.boat)} · ±${tvLogic.BOAT_BAND}s`; return; }
+    const bar = document.createElement('span'); bar.className = 'band-bar';
+    const tick = document.createElement('span'); tick.className = 'band-tick';
+    const span = t.slow - t.fast;
+    tick.style.left = `${span > 0 ? ((t.boat - t.fast) / span) * 100 : 50}%`;
+    bar.append(tick);
+    el.replaceChildren(`${tvLogic.formatPace(t.fast)} `, bar, ` ${tvLogic.formatPace(t.slow)}${rate}`);
 }
 
 // ---------- connection status ----------
@@ -631,32 +678,42 @@ function changePreset(dir) {
     const cur = target().preset;
     const i = Math.max(0, PRESET_ORDER.indexOf(cur));
     const next = PRESET_ORDER[(i + dir + PRESET_ORDER.length) % PRESET_ORDER.length];
-    manual = { date: todayKey(), preset: next, shift: 0 };
+    manual = { date: todayKey(), preset: next, shift: 0, boat: null };
     persist();
     toast(tvLogic.PRESETS[next].label);
     queueRender();
 }
 
-function shiftTarget(delta) {
+// ↑/↓ move the pace boat (#29). In a plan mode it stays inside the band;
+// in PM5-only mode it is the target and turns off past 3:00.
+function moveBoat(dir) {
     const t = target();
-    if (!Number.isFinite(t.fast)) return;
-    manual = { date: todayKey(), preset: manual?.preset ?? null, shift: (manual?.shift ?? 0) + delta };
+    if (t.preset === 'free') {
+        freeBoat = tvLogic.stepBoat(freeBoat, dir);
+        toast(Number.isFinite(freeBoat) ? `Boat ${tvLogic.formatPace(freeBoat)}` : 'Boat off');
+    } else {
+        if (!Number.isFinite(t.fast)) return;
+        const boat = tvLogic.stepBoat(t.boat, dir, { fast: t.fast, slow: t.slow });
+        manual = { date: todayKey(), preset: manual?.preset ?? null, shift: manual?.shift ?? 0, boat };
+        toast(boat === t.boat ? `Boat ${tvLogic.formatPace(boat)} (edge of the band)` : `Boat ${tvLogic.formatPace(boat)}`);
+    }
     persist();
-    const nt = target();
-    toast(`Target ${tvLogic.formatPace(nt.fast)}–${tvLogic.formatPace(nt.slow)}`);
     queueRender();
 }
 
 // Locked while a piece is under way, so a bumped remote can't change the
 // target mid-piece. Free during rest, before the first stroke and after.
-const arrowsLocked = () => {
+const arrowsLocked = (key) => {
+    // PM5-only warm-ups are one long piece, so the boat can move while rowing.
+    if ((key === 'ArrowUp' || key === 'ArrowDown') && target().preset === 'free') return false;
     const p = tracker.current;
     return !!p && tracker.working && !tracker.finished && !!p.last && (p.last.d - p.origin.d) > 20;
 };
 
 function onKey(e) {
     nudgeToolbar();
-    if (e.key.startsWith('Arrow') && arrowsLocked()) {
+    if (tracker.finished || session.finishedAt) slog(`key ${e.key} finished=${tracker.finished} asking=${!$('#rpe').hidden}`);
+    if (e.key.startsWith('Arrow') && arrowsLocked(e.key)) {
         toast('Remote locked while rowing. Change it in the rest.');
         e.preventDefault();
         return;
@@ -669,6 +726,7 @@ function onKey(e) {
             if (step) session.rpe = summaryLogic.stepRpe(session.rpe, step);
             else if (digit) session.rpe = digit;
             else confirmRpe();
+            slog(`RPE key ${e.key}`);
             queueRender(); e.preventDefault(); return;
         }
     }
@@ -688,11 +746,11 @@ function onKey(e) {
         case 'ArrowRight': changePreset(1); break;
         case 'ArrowUp':
             if (showingWods(target())) { wodBucket = Math.max(0, wodBucket - 1); queueRender(); }
-            else shiftTarget(-0.5);                   // faster
+            else moveBoat(-1);                        // faster
             break;
         case 'ArrowDown':
             if (showingWods(target())) { wodBucket = Math.min(wodLogic.BUCKETS.length - 1, wodBucket + 1); queueRender(); }
-            else shiftTarget(0.5);                    // slower
+            else moveBoat(1);                         // slower
             break;
         case 'Enter': {
             const h = $('#help');
