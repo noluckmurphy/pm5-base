@@ -52,7 +52,7 @@ const target = () => {
     return t;
 };
 
-const persist = () => store.save({ ...saved, manual, hrBounds, freeBoat, lastPreset: target().preset });
+const persist = () => store.save({ ...saved, manual, hrBounds, freeBoat, pm5Splits: tracker.knownSplits, lastPreset: target().preset });
 
 async function loadPlan() {
     const urls = NATIVE || location.hostname.endsWith('github.io') ? [`${PLAN_URL}?t=${Date.now()}`, 'today.json'] : ['today.json'];
@@ -80,6 +80,14 @@ tracker.beforeReset = () => { if (session.finishedAt && !session.saved) { slog('
 // and lost-row bugs can be traced: one "[ergtv] ui …" line per transition.
 function slog(msg) { console.info(`[ergtv] ui ${msg} | state=${state.workoutState ?? ''} gen=${tracker.generation ?? 0} rpe=${session?.rpe ?? ''} saved=${typeof session?.saved === 'object' && session?.saved ? (session.saved.ok ? 'ok' : 'fail') : session?.saved ?? ''}`); }
 tracker.onLog = slog;
+// The PM5 doesn't say its split length until the first split ends, so the
+// first time a programme is rowed the board guesses, then re-cuts to the
+// PM5's splits. Remember them per programme so next time matches from the start.
+tracker.knownSplits = saved.pm5Splits && typeof saved.pm5Splits === 'object' ? { ...saved.pm5Splits } : {};
+tracker.onLearnSplit = (key, size, was) => {
+    persist();
+    if (size !== was) toast(`Splits now match the PM5: ${key.startsWith('time') ? tvLogic.formatClock(size) : `${size}m`} each`);
+};
 let renderQueued = false;
 
 const resetSession = () => { state = {}; tracker.reset(); session = newSession(); clearTimeout(saveTimer); saveTimer = null; queueRender(); };
@@ -241,7 +249,7 @@ const vsLastCell = (delta) => {
 // block), or null for Just Row / nothing programmed yet.
 function armedChunk() {
     if (tracker.pieces.length || tracker.finished || tracker.program.workoutDurationType === undefined) return null;
-    const chunk = splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType);
+    const chunk = splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType, tracker.knownSplits);
     return chunk.total > 0 ? chunk : null;
 }
 
@@ -410,9 +418,9 @@ function renderSummary(t, hasTarget) {
     setText($('#bd-avg'), foot.join('  ·  '));
     const sv = session.saved;
     const rpeTxt = session.rpe ? `RPE ${session.rpe} · ` : '';
-    setText($('#bd-pieces'), !sv ? (session.rpeDone ? 'Saving to your log…' : '')
-        : sv === 'saving' ? `${rpeTxt}Saving to your log…`
-        : sv.ok ? `${rpeTxt}Saved to your log ✓` : `${rpeTxt}Not in your log yet: ${sv.msg}`);
+    setText($('#bd-pieces'), !sv ? (session.rpeDone ? 'Saving to Erg TV log…' : '')
+        : sv === 'saving' ? `${rpeTxt}Saving to Erg TV log…`
+        : sv.ok ? `${rpeTxt}Saved to Erg TV log ✓ · not sent to Concept2 Logbook` : `${rpeTxt}Not in Erg TV log yet: ${sv.msg}`);
     renderRpe();
 }
 
@@ -565,7 +573,7 @@ function render() {
         + (Number.isFinite(t.boat) && !t.boatOnly ? ` · boat ${tvLogic.formatPace(t.boat)}` : ''));
     const piece = tracker.current ?? tracker.pieces[tracker.pieces.length - 1];
     const chunk = piece?.chunk ?? (tracker.program.workoutDurationType !== undefined
-        ? splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType) : null);
+        ? splitsLogic.chunkFor(tracker.program.workoutDuration, tracker.program.workoutDurationType, tracker.knownSplits) : null);
     const diff = t.fromPlan ? tvLogic.planMismatch(planDay?.piece, chunk, tracker.restSeconds) : [];
     const warn = $('#plan-warn');
     warn.hidden = !diff.length;

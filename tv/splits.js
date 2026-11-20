@@ -10,9 +10,15 @@ const splitsLogic = {
 
     // How big each chunk is, from what the PM5 says the piece is.
     // Distance pieces: <=500m -> 100m, <=2000m -> 250m, longer -> 500m.
-    // Time pieces: <=3min -> 30s, <=10min -> 1min, longer -> 2min.
+    // Time pieces: <=3min -> 30s, <=10min -> 1min, longer -> a fifth of
+    // the piece (the PM5's own default: 30:00 -> 6:00 splits).
     // Just-row / unknown -> 500m.
-    chunkFor(workoutDuration, workoutDurationType) {
+    // known: { 'time:1800': 360, ... } split lengths the PM5 reported for
+    // this exact programme before; used from the first stroke when present.
+    chunkFor(workoutDuration, workoutDurationType, known = null) {
+        const kind = workoutDurationType === 0x80 ? 'distance' : workoutDurationType === 0x00 ? 'time' : null;
+        const k = kind && workoutDuration > 0 ? known?.[`${kind}:${workoutDuration}`] : undefined;
+        if (k > 0 && k < workoutDuration) return { kind, size: k, total: workoutDuration };
         if (workoutDurationType === 0x80 && workoutDuration > 0) {
             if (workoutDuration <= 500) return { kind: 'distance', size: 100, total: workoutDuration };
             if (workoutDuration <= 2000) return { kind: 'distance', size: 250, total: workoutDuration };
@@ -21,6 +27,7 @@ const splitsLogic = {
         if (workoutDurationType === 0x00 && workoutDuration > 0) {
             if (workoutDuration <= 180) return { kind: 'time', size: 30, total: workoutDuration };
             if (workoutDuration <= 600) return { kind: 'time', size: 60, total: workoutDuration };
+            if (workoutDuration % 5 === 0) return { kind: 'time', size: workoutDuration / 5, total: workoutDuration };
             return { kind: 'time', size: 120, total: workoutDuration };
         }
         return { kind: 'distance', size: 500, total: 0 };
@@ -237,7 +244,7 @@ class SplitTracker {
     _clear(reason = '') {
         this.onLog?.(`tracker clear (${reason}) pieces=${this.pieces.length} finished=${this.finished} hold=${!!this.hold}`);
         if (this.pieces.some(p => p.splits.length)) this.beforeReset?.();
-        const keep = { hold: this.hold, beforeReset: this.beforeReset, onLog: this.onLog, generation: (this.generation ?? 0) + 1 };
+        const keep = { hold: this.hold, beforeReset: this.beforeReset, onLog: this.onLog, onLearnSplit: this.onLearnSplit, knownSplits: this.knownSplits, generation: (this.generation ?? 0) + 1 };
         this.reset();
         Object.assign(this, keep);
     }
@@ -357,12 +364,12 @@ class SplitTracker {
             this._endPiece(); // counters went back: new interval
         }
         if (!this.current) {
-            const chunk = splitsLogic.chunkFor(this.program.workoutDuration, this.program.workoutDurationType);
+            const chunk = splitsLogic.chunkFor(this.program.workoutDuration, this.program.workoutDurationType, this.knownSplits);
             this.current = splitsLogic.newPiece(chunk);
             this.pieces.push(this.current);
         } else if (this.current.splits.length === 0 && this.program.workoutDurationType !== undefined) {
             // duration info may arrive just after the first samples
-            this.current.chunk = splitsLogic.chunkFor(this.program.workoutDuration, this.program.workoutDurationType);
+            this.current.chunk = splitsLogic.chunkFor(this.program.workoutDuration, this.program.workoutDurationType, this.knownSplits);
         }
         this.current.samples.push({ elapsedTime: data.elapsedTime, distance: data.distance, strokeRate: data.strokeRate, heartRate: data.heartRate });
         splitsLogic.addSample(this.current, data);
@@ -377,7 +384,13 @@ class SplitTracker {
         const size = p.chunk.kind === 'time' ? Math.round(data.splitIntervalTime) : Math.round(data.splitIntervalDistance);
         if (!(size > 0) || size >= p.chunk.total) return;
         p.pm5Split = size;
+        const key = `${p.chunk.kind}:${p.chunk.total}`;
+        if (this.knownSplits?.[key] !== size) {
+            (this.knownSplits ??= {})[key] = size;
+            this.onLearnSplit?.(key, size, p.chunk.size);
+        }
         if (size === p.chunk.size) return;
+        this.onLog?.(`tracker re-cut ${key} from ${p.chunk.size} to PM5 split ${size}`);
         const chunk = { ...p.chunk, size };
         const fresh = splitsLogic.newPiece(chunk);
         fresh.samples = p.samples;
